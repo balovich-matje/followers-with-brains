@@ -225,14 +225,14 @@ namespace Test
 				"  enemy further away: melee {:.1f}s, ranged {:.1f}s\n"
 				"  weapon switches seen: {}, mod wanted: {}\n"
 				"  damage dealt: melee {:.0f} ({} hits), ranged {:.0f} ({} hits); follower health {:.0f}\n"
-				"  reflexes: {} stepped out, {} blocked, {} bashed, {} taken, {} punishes, {} zig-zag approaches; damage taken {:.0f}\n",
+				"  reflexes: {} enemy attacks nearby; {} stepped out, {} blocked, {} bashed ({} of those avoided all damage), {} taken, {} punishes, {} zig-zag approaches; damage taken {:.0f}\n",
 				g_run + 1, g_cfg.scenario, a_why, g_timer, AliveSpawned(), g_spawned.size(), g_relocated,
 				g_firstDamage < 0.0f ? std::string{ "never" } : std::format("{:.1f}s", g_firstDamage),
 				g_meleeNearTime, g_rangedNearTime, g_idleNearTime, g_meleeFarTime, g_rangedFarTime,
 				g_switches, info.pref == 1 ? "melee" : (info.pref == 2 ? "ranged" : "nothing"),
 				info.dealt[0], info.hits[0], info.dealt[1], info.hits[1],
 				follower ? follower->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth) : 0.0f,
-				info.stepOuts, info.blocks, info.bashes, info.taken, info.punishes, info.zigzags, info.damageTaken);
+				info.enemyAttacks, info.stepOuts, info.blocks, info.bashes, info.avoided, info.taken, info.punishes, info.zigzags, info.damageTaken);
 			g_report.flush();
 			logger::info("[test] run {} ended: {}", g_run + 1, a_why);
 			++g_run;

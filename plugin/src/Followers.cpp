@@ -669,8 +669,12 @@ namespace Followers
 		struct ReflexStats
 		{
 			int stepOuts = 0, blocks = 0, bashes = 0, taken = 0, punishes = 0, zigzags = 0;
+			int enemyAttacks = 0;   // attack starts by enemies within 450 of a follower
+			int avoided = 0;        // reactions with no damage taken in the next 1.2 s
 			float damageTaken = 0.0f;
 		} g_stats;
+		float g_lastFollowerHurt = -100.0f;
+		std::vector<float> g_pendingCheck;  // reaction times waiting for their 1.2 s verdict
 
 		bool HasShield(RE::Actor* a)
 		{
@@ -746,12 +750,21 @@ namespace Followers
 			}
 			r.against = e->GetHandle();
 			r.cooldownUntil = g_time + 1.0f;
+			g_pendingCheck.push_back(g_time);
 			Debug(std::format("{}: {} vs {} ({}{:.0f} dmg, {:.0f}% hp)", Name(f), what, Name(e), power ? "power, " : "", hit, share * 100.0f));
 		}
 
 		void UpdateReflexes()
 		{
 			if (!Settings::Get().reflexes) return;
+			for (auto it = g_pendingCheck.begin(); it != g_pendingCheck.end();) {
+				if (g_time - *it < 1.2f) {
+					++it;
+					continue;
+				}
+				if (g_lastFollowerHurt < *it) ++g_stats.avoided;
+				it = g_pendingCheck.erase(it);
+			}
 			for (auto& fh : g_lastFollowers) {
 				auto f = Get(fh);
 				if (!f || !Alive(f)) continue;
@@ -800,6 +813,7 @@ namespace Followers
 
 					bool starting = prev == RE::ATTACK_STATE_ENUM::kNone &&
 					                (state == RE::ATTACK_STATE_ENUM::kDraw || state == RE::ATTACK_STATE_ENUM::kSwing);
+					if (starting) ++g_stats.enemyAttacks;
 					// the attack is meant for us if we are its target, or we are in front of it and within reach
 					bool aimedAtUs = CombatTarget(e) == f;
 					if (!aimedAtUs && d < 350.0f) {
@@ -1205,6 +1219,7 @@ namespace Followers
 				if (a_attacker && a_victim && !a_victim->IsPlayerRef() && a_victim->IsPlayerTeammate() && !a_attacker->IsPlayerTeammate()) {
 					std::scoped_lock lock{ g_lock };
 					g_stats.damageTaken += std::abs(a_damage);
+					g_lastFollowerHurt = g_time;
 				}
 				if (a_attacker && a_attacker != a_victim && !a_attacker->IsPlayerRef() && a_attacker->IsPlayerTeammate()) {
 					std::scoped_lock lock{ g_lock };
@@ -1318,6 +1333,7 @@ namespace Followers
 		g_enemyStagger.clear();
 		g_zig.clear();
 		g_stats = {};
+		g_pendingCheck.clear();
 		{
 			std::scoped_lock lock{ g_prefLock };
 			g_weaponPref.clear();
@@ -1362,6 +1378,8 @@ namespace Followers
 		info.punishes = g_stats.punishes;
 		info.zigzags = g_stats.zigzags;
 		info.damageTaken = g_stats.damageTaken;
+		info.enemyAttacks = g_stats.enemyAttacks;
+		info.avoided = g_stats.avoided;
 		auto it = g_state.find(a_actor->GetFormID());
 		if (it != g_state.end()) {
 			for (int i = 0; i < 2; ++i) {

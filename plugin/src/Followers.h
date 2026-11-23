@@ -14,6 +14,7 @@ namespace Followers
 		int   hits[2]{};
 		int   stepOuts = 0, blocks = 0, bashes = 0, taken = 0, punishes = 0, zigzags = 0;
 		float damageTaken = 0.0f;
+		int   enemyAttacks = 0, avoided = 0;
 	};
 	DebugInfo GetDebugInfo(RE::Actor* a_actor);
 
