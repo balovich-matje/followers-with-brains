@@ -73,6 +73,12 @@ namespace Followers
 			float unreachableUntil = 0.0f;    // melee could not reach its target recently
 			float engagingUntil = 0.0f;       // just told to attack: the game may not show combat yet
 			float lastFinish = -100.0f;
+			RE::ActorHandle chargeTarget;
+			bool  chargeBlockNoted = false;
+			// progress toward the combat target: no closer in 5 s = can't reach it (on a wall, across a gap)
+			RE::ActorHandle progressTarget;
+			float bestTargetDist = 0.0f;
+			float bestTargetTime = 0.0f;
 			float lastSprintKick = -100.0f;
 			bool  mirroringSprint = false;
 			// measured damage while holding each kind of weapon (0 melee, 1 ranged)
@@ -1124,13 +1130,22 @@ namespace Followers
 			auto& cfg = Settings::Get();
 			if (!cfg.zigzag || !Alive(a_target) || !IsRanged(a_target) || g_retreating) return false;
 			if (g_reflex[f->GetFormID()].action != 0) return false;
+			if (std::string_view{ Driver::LastEnd(f) } == "blocked" && s.chargeTarget && !s.chargeBlockNoted) {
+				g_nextCharge[f->GetFormID()] = g_time + 6.0f;  // the straight line didn't work: give pathfinding time
+				s.chargeBlockNoted = true;
+			}
 			if (g_time < g_nextCharge[f->GetFormID()]) return false;
+			s.chargeBlockNoted = false;
 			float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
 			if (GetLoadout(f, s).PrefersRanged(bias)) return false;  // archers and mages don't charge
 			float d = Dist(f, a_target);
 			// Far: charge right away. Close/Medium: trade shots first, charge from about two seconds away.
 			float startAt = cfg.combatDistance == 2 ? 4000.0f : kSprintReach;
 			if (d < kChargeStart || d > startAt) return false;
+			// only a straight run on level ground: a shooter on a wall or up a slope is the pathfinder's job
+			if (std::fabs(a_target->GetPosition().z - f->GetPosition().z) > 120.0f) return false;
+			if (!Driver::ClearLine(f, f->GetPosition(), a_target->GetPosition())) return false;
+			if (g_time < s.unreachableUntil) return false;
 			SetWeaponPref(f, 1);
 			Swap(f, s, false, "charging a shooter");
 			Driver::Order order;
@@ -1145,6 +1160,7 @@ namespace Followers
 			order.sprint = true;
 			if (!Driver::Start(f, order)) return false;
 			g_nextCharge[f->GetFormID()] = g_time + 1.5f;
+			s.chargeTarget = a_target->GetHandle();
 			++g_stats.zigzags;
 			Debug(std::format("{} charges {}", Name(f), Name(a_target)));
 			return true;
@@ -1514,6 +1530,21 @@ namespace Followers
 			}
 
 			// ---- ranged or melee
+			{
+				float td = Dist(f, target);
+				if (Get(s.progressTarget) != target) {
+					s.progressTarget = target->GetHandle();
+					s.bestTargetDist = td;
+					s.bestTargetTime = g_time;
+				} else if (td < s.bestTargetDist - 100.0f) {
+					s.bestTargetDist = td;
+					s.bestTargetTime = g_time;
+				} else if (td > 300.0f && g_time - s.bestTargetTime > 5.0f && g_time >= s.unreachableUntil) {
+					s.unreachableUntil = g_time + 8.0f;
+					s.bestTargetTime = g_time;
+					Debug(std::format("{} can't reach {}", Name(f), Name(target)));
+				}
+			}
 			if (MaybeCharge(f, s, target)) return;
 			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
 			if (Dist(f, target) > 300.0f) StandUp(f);
