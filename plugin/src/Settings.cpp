@@ -30,6 +30,8 @@ namespace Settings
 			{ "Placement"sv, &Values::placement },
 		};
 		constexpr BoolField kBools[] = {
+			{ "CombatMovement"sv, &Values::combatMovement },
+			{ "OutsideMovement"sv, &Values::outsideMovement },
 			{ "CatchUp"sv, &Values::catchUp },
 			{ "Sandbox"sv, &Values::sandbox },
 			{ "Teleport"sv, &Values::teleport },

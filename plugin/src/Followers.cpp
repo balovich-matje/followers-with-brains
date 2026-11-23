@@ -832,7 +832,7 @@ namespace Followers
 		{
 			auto  player = a_scan.player;
 			auto& cfg = Settings::Get();
-			if (!cfg.retreat || !player->IsInCombat() || a_scan.enemies.empty()) {
+			if (!cfg.retreat || !cfg.combatMovement || !player->IsInCombat() || a_scan.enemies.empty()) {
 				if (g_retreating) Debug("Retreat over");
 				g_retreating = false;
 				g_samples.clear();
@@ -1093,7 +1093,7 @@ namespace Followers
 
 		void UpdateReflexes()
 		{
-			if (!Settings::Get().reflexes) return;
+			if (!Settings::Get().reflexes || !Settings::Get().combatMovement) return;
 			for (auto it = g_pendingCheck.begin(); it != g_pendingCheck.end();) {
 				if (g_time - *it < 1.2f) {
 					++it;
@@ -1226,7 +1226,7 @@ namespace Followers
 		bool MaybeCharge(RE::Actor* f, FollowerState& s, RE::Actor* a_target)
 		{
 			auto& cfg = Settings::Get();
-			if (!cfg.zigzag || !Alive(a_target) || !IsRanged(a_target) || g_retreating) return false;
+			if (!cfg.zigzag || !cfg.combatMovement || !Alive(a_target) || !IsRanged(a_target) || g_retreating) return false;
 			if (g_reflex[f->GetFormID()].action != 0) return false;
 			if (std::string_view{ Driver::LastEnd(f) } == "blocked" && s.chargeTarget && !s.chargeBlockNoted) {
 				g_nextCharge[f->GetFormID()] = g_time + 6.0f;  // the straight line didn't work: give pathfinding time
@@ -1320,7 +1320,7 @@ namespace Followers
 				// fighter: charge. Shoot only at what they can't reach, or what is too far from the player to chase.
 				auto  player = RE::PlayerCharacter::GetSingleton();
 				float leash = kTuning[std::clamp(cfg.combatDistance, 0, 2)].combatLeash;
-				bool  cantChase = (cfg.combatLeash && Dist(a_target, player) > leash) || g_time < s.unreachableUntil;
+				bool  cantChase = ((cfg.combatLeash && cfg.combatMovement) && Dist(a_target, player) > leash) || g_time < s.unreachableUntil;
 				// Close/Medium: trade a few shots with a far shooter before charging
 				if (cfg.combatDistance != 2 && IsRanged(a_target) && d > kSprintReach) cantChase = true;
 				// never pull a bow with an enemy this close, whatever else is going on
@@ -1369,7 +1369,7 @@ namespace Followers
 				bool drawn = player->AsActorState()->IsWeaponDrawn();
 				if (drawn) g_lastDrawn = g_time;
 				float needLinger = g_time - g_lastDrawn < 60.0f ? 30.0f : 15.0f;  // weapons were out: wait longer
-				bool relax = cfg.sandbox && safe && !drawn && mode != 0 && !inCombat && !player->IsInCombat() &&
+				bool relax = cfg.sandbox && cfg.outsideMovement && safe && !drawn && mode != 0 && !inCombat && !player->IsInCombat() &&
 				             g_lingerSeconds >= needLinger && sameSpace;
 				if (safe != g_lastSafe) {
 					g_lastSafe = safe;
@@ -1450,7 +1450,7 @@ namespace Followers
 			} else {
 				ClearOffset(f, s);
 			}
-			bool formation = !busy && sameSpace && !inCombat && !recalling && mode != 2 && !waiting && dist < 1500.0f;
+			bool formation = cfg.outsideMovement && !busy && sameSpace && !inCombat && !recalling && mode != 2 && !waiting && dist < 1500.0f;
 			if (formation && !Driver::IsDriving(f) && g_time >= s.pathUntil) {
 				std::string_view lastEnd = Driver::LastEnd(f);
 				if (lastEnd == "blocked" || lastEnd == "edge" || lastEnd == "step" || lastEnd == "too far") {
@@ -1518,9 +1518,9 @@ namespace Followers
 				float lag = f->GetPosition().GetDistance(SpotInWorld(player, OffsetSpot(mode, a_slot)));
 				if (lag > 90.0f) lagBoost = std::min(60.0f, std::floor((lag - 90.0f) / 40.0f + 1.0f) * 15.0f);
 			}
-			if (cfg.catchUp && travelling && dist > boostAt) {
+			if (cfg.catchUp && cfg.outsideMovement && travelling && dist > boostAt) {
 				SetBoost(f, s, kSpeedBoost);
-			} else if (cfg.catchUp && lagBoost > 0.0f) {
+			} else if (cfg.catchUp && cfg.outsideMovement && lagBoost > 0.0f) {
 				SetBoost(f, s, lagBoost);
 			} else if (s.speedBoost != 0.0f && (!travelling || (dist < boostAt * 0.6f && lagBoost == 0.0f))) {
 				SetBoost(f, s, 0.0f);
@@ -1546,7 +1546,7 @@ namespace Followers
 				s.mirroringSprint = false;
 			}
 
-			if (cfg.teleport && travelling && !inCombat && dist > tune.teleportDistance) {
+			if (cfg.teleport && cfg.outsideMovement && travelling && !inCombat && dist > tune.teleportDistance) {
 				if (s.farSince < 0.0f) s.farSince = g_time;
 				bool seen = false;
 				bool unused = false;
@@ -1586,7 +1586,7 @@ namespace Followers
 				s.stuckSince = -1.0f;
 				// join the fight when the player is fighting and nobody told us
 				if (!recalling && !waiting && !g_retreating && cfg.awareness && player->IsInCombat()) {
-					float reach = cfg.combatLeash ? leash : 2500.0f;
+					float reach = (cfg.combatLeash && cfg.combatMovement) ? leash : 2500.0f;
 					if (auto enemy = PickEnemy(f, a_scan, nullptr, reach); enemy && g_time - s.lastRetarget > 1.0f && g_time - s.lastStop > 3.0f) {
 						StartCombat(f, s, enemy, "joining your fight");
 					}
@@ -1599,13 +1599,13 @@ namespace Followers
 
 			// ---- retarget when the target is gone
 			if (cfg.retarget && !Alive(target) && g_time - s.lastRetarget > 0.5f) {
-				if (auto next = PickEnemy(f, a_scan, nullptr, cfg.combatLeash ? leash : kEnemyRange)) StartCombat(f, s, next, "next enemy");
+				if (auto next = PickEnemy(f, a_scan, nullptr, (cfg.combatLeash && cfg.combatMovement) ? leash : kEnemyRange)) StartCombat(f, s, next, "next enemy");
 				return;
 			}
 			if (!target) return;
 
 			// ---- a downed (bleeding out, kneeling) enemy: close in and finish it, don't stand back
-			if (target->AsActorState()->IsBleedingOut() && !IsRanged(f) && Dist(f, target) < 900.0f) {
+			if (cfg.combatMovement && target->AsActorState()->IsBleedingOut() && !IsRanged(f) && Dist(f, target) < 900.0f) {
 				float reach = 150.0f;
 				if (auto weap = f->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
 					reach = std::max(120.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
@@ -1626,7 +1626,7 @@ namespace Followers
 			}
 
 			// ---- leash: don't chase enemies far away from the player
-			if (cfg.combatLeash && dist > leash && Dist(target, player) > leash * 0.8f && g_time - s.lastLeash > 2.0f) {
+			if ((cfg.combatLeash && cfg.combatMovement) && dist > leash && Dist(target, player) > leash * 0.8f && g_time - s.lastLeash > 2.0f) {
 				s.lastLeash = g_time;
 				if (auto closer = PickEnemy(f, a_scan, nullptr, leash)) {
 					StartCombat(f, s, closer, "too far from you");
@@ -1654,7 +1654,7 @@ namespace Followers
 					Debug(std::format("{} can't reach {}", Name(f), Name(target)));
 				}
 				// the pathfinder can't get there: take the player's route, if it passes near the target
-				if (g_time < s.unreachableUntil && !Driver::IsDriving(f) && RunTrail(f, s, player, target, "to the enemy")) {
+				if (cfg.combatMovement && g_time < s.unreachableUntil && !Driver::IsDriving(f) && RunTrail(f, s, player, target, "to the enemy")) {
 					s.unreachableUntil = 0.0f;
 					s.bestTargetTime = g_time;
 					return;
