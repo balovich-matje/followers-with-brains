@@ -1,5 +1,6 @@
 #include "Followers.h"
 #include "Driver.h"
+#include "Tuning.h"
 #include "Recorder.h"
 #include "Loadout.h"
 #include "Papyrus.h"
@@ -57,6 +58,7 @@ namespace Followers
 			float respectAIUntil = 0.0f;
 			float unreachableUntil = 0.0f;    // melee could not reach its target recently
 			float engagingUntil = 0.0f;       // just told to attack: the game may not show combat yet
+			float lastFinish = -100.0f;
 			// measured damage while holding each kind of weapon (0 melee, 1 ranged)
 			float dealt[2]{};
 			float heldTime[2]{};
@@ -743,7 +745,8 @@ namespace Followers
 				r.bashTime = g_time;
 				++g_stats.bashes;
 				what = "bash";
-			} else if ((power || share > 0.2f) && g_time >= r.dodgeReadyAt && (std::rand() % 100) < 75) {
+			} else if ((power || share > Tuning::Get().dodgeShare) && g_time >= r.dodgeReadyAt &&
+					   static_cast<float>(std::rand() % 100) < Tuning::Get().dodgeChance) {
 				if (!power && HasShield(f)) {
 					f->NotifyAnimationGraph("blockStart"sv);
 					r.action = 2;
@@ -759,14 +762,15 @@ namespace Followers
 					Driver::Order order;
 					order.kind = Driver::Kind::kStepBack;
 					order.target = e->GetHandle();
-					order.speed = 450.0f;  // a player's diagonal backpedal (measured)
+					order.speed = Tuning::Get().stepSpeed;  // a player's diagonal backpedal (measured)
+					order.weave = Tuning::Get().stepDiagonal;
 					order.stopDistance = Dist(f, e) + reach * 0.5f + 80.0f;
 					order.duration = 1.8f;  // the drive ends when the swing is over
 					order.holdWhileAttacked = true;
 					Driver::Start(f, order);
 					r.action = 1;
 					r.until = g_time + 2.0f;
-					r.dodgeReadyAt = g_time + 2.5f;  // not every attack: a breather before the next dodge
+					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown;  // a breather before the next dodge
 					++g_stats.stepOuts;
 					what = "step out";
 				}
@@ -851,7 +855,7 @@ namespace Followers
 						Driver::Order order;
 						order.kind = Driver::Kind::kRunTo;
 						order.target = e->GetHandle();
-						order.speed = 380.0f;
+						order.speed = Tuning::Get().closeSpeed;
 						order.stopDistance = reach * 0.85f;
 						order.duration = 1.2f;
 						Driver::Start(f, order);
@@ -927,7 +931,10 @@ namespace Followers
 			Driver::Order order;
 			order.kind = Driver::Kind::kCharge;
 			order.target = a_target->GetHandle();
-			order.speed = 510.0f;  // a player's run (measured); sprint waits for a working sprint animation
+			order.speed = Tuning::Get().chargeSpeed;  // a player's run (measured); sprint waits for a working sprint animation
+			order.weave = Tuning::Get().weave;
+			order.flipMin = Tuning::Get().flipMin;
+			order.flipMax = Tuning::Get().flipMax;
 			order.stopDistance = kChargeStop;
 			order.duration = 10.0f;
 			order.sprint = false;
@@ -1122,6 +1129,27 @@ namespace Followers
 				return;
 			}
 			if (!target) return;
+
+			// ---- a downed (bleeding out, kneeling) enemy: close in and finish it, don't stand back
+			if (target->AsActorState()->IsBleedingOut() && !IsRanged(f) && Dist(f, target) < 900.0f) {
+				float reach = 150.0f;
+				if (auto weap = f->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
+					reach = std::max(120.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
+				}
+				if (Dist(f, target) > reach + 40.0f) {
+					Driver::Order order;
+					order.kind = Driver::Kind::kRunTo;
+					order.target = target->GetHandle();
+					order.speed = Tuning::Get().closeSpeed;
+					order.stopDistance = reach * 0.85f;
+					order.duration = 2.0f;
+					if (Driver::Start(f, order)) Debug(std::format("{} goes to finish {}", Name(f), Name(target)));
+				} else if (f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone && g_time - s.lastFinish > 1.0f) {
+					f->NotifyAnimationGraph("attackStart"sv);
+					s.lastFinish = g_time;
+				}
+				return;
+			}
 
 			// ---- leash: don't chase enemies far away from the player
 			if (cfg.combatLeash && dist > leash && Dist(target, player) > leash * 0.8f && g_time - s.lastLeash > 2.0f) {
@@ -1412,6 +1440,7 @@ namespace Followers
 
 	void Reset()
 	{
+		Tuning::Load();
 		{
 			std::scoped_lock lock{ g_lock };
 			g_queue.clear();

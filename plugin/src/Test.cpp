@@ -1,6 +1,7 @@
 #include "Test.h"
 #include "Followers.h"
 #include "Papyrus.h"
+#include "Tuning.h"
 
 namespace Test
 {
@@ -38,7 +39,11 @@ namespace Test
 			std::string scenario = "mixed";
 			int         runs = 3;
 			float       duration = 60.0f;
-			float       enemyHealth = 0.0f;  // optional extra health for spawned enemies
+			float       enemyHealth = 0.0f;     // optional extra health for spawned enemies
+			float       followerHealth = 0.0f;  // optional extra health for the follower (test save only)
+			bool        keepOpen = false;       // after the last run, wait for next.ini instead of quitting
+			std::string commandDir;             // a real folder (outside the mod manager) for next.ini and tuning
+			std::vector<std::string> scenarios;  // from Scenario=a,b,c
 		} g_cfg;
 
 		enum class Phase
@@ -55,6 +60,7 @@ namespace Test
 		Phase g_phase = Phase::kIdle;
 		float g_timer = 0.0f;
 		int   g_run = 0;
+		std::string g_currentScenario;
 		bool  g_menuSeen = false;
 		std::vector<RE::ActorHandle> g_spawned;
 		struct Placement
@@ -113,11 +119,13 @@ namespace Test
 			return b == std::string_view::npos ? std::string{} : std::string{ a_text.substr(b, e - b + 1) };
 		}
 
-		void ReadConfig()
+		void ReadConfig(const std::filesystem::path& a_path = kConfig)
 		{
-			std::ifstream in{ kConfig };
+			std::ifstream in{ a_path };
 			if (!in) return;
 			g_cfg.active = true;
+			g_cfg.enemyHealth = 0.0f;
+			g_cfg.followerHealth = 0.0f;
 			std::string line;
 			while (std::getline(in, line)) {
 				auto eq = line.find('=');
@@ -126,10 +134,19 @@ namespace Test
 				auto value = Trim(std::string_view{ line }.substr(eq + 1));
 				if (key == "Save") g_cfg.save = value;
 				else if (key == "Scenario") g_cfg.scenario = value;
+				else if (key == "FollowerHealth") g_cfg.followerHealth = static_cast<float>(std::atof(value.c_str()));
+				else if (key == "KeepOpen") g_cfg.keepOpen = value == "1";
+				else if (key == "CommandDir") g_cfg.commandDir = value;
 				else if (key == "Runs") g_cfg.runs = std::max(1, std::atoi(value.c_str()));
 				else if (key == "Duration") g_cfg.duration = static_cast<float>(std::atof(value.c_str()));
 				else if (key == "EnemyHealth") g_cfg.enemyHealth = static_cast<float>(std::atof(value.c_str()));
 			}
+			g_cfg.scenarios.clear();
+			std::stringstream list{ g_cfg.scenario };
+			for (std::string item; std::getline(list, item, ',');) {
+				if (!item.empty()) g_cfg.scenarios.push_back(item);
+			}
+			if (g_cfg.scenarios.empty()) g_cfg.scenarios.push_back("mixed");
 		}
 
 		void Console(std::string_view a_command)
@@ -144,7 +161,7 @@ namespace Test
 
 		void LoadSave()
 		{
-			logger::info("[test] loading save {} (run {}/{})", g_cfg.save, g_run + 1, g_cfg.runs);
+			logger::info("[test] loading save {} (run {}/{})", g_cfg.save, g_run + 1, g_cfg.runs * static_cast<int>(g_cfg.scenarios.size()));
 			g_phase = Phase::kLoading;
 			if (auto manager = RE::BGSSaveLoadManager::GetSingleton()) manager->Load(g_cfg.save.c_str(), false);
 		}
@@ -190,7 +207,12 @@ namespace Test
 			g_placements.clear();
 			g_relocated = 0;
 			g_waterCheck = 0.0f;
-			for (auto& spawn : Scenario(g_cfg.scenario)) {
+			g_currentScenario = g_cfg.scenarios[std::min<std::size_t>(g_run / g_cfg.runs, g_cfg.scenarios.size() - 1)];
+			if (g_cfg.followerHealth > 0.0f && follower) {
+				follower->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, g_cfg.followerHealth);
+				follower->AsActorValueOwner()->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, g_cfg.followerHealth);
+			}
+			for (auto& spawn : Scenario(g_currentScenario)) {
 				auto base = RE::TESForm::LookupByID<RE::TESNPC>(spawn.base);
 				if (!base) continue;
 				auto ref = player->PlaceObjectAtMe(base, false);
@@ -208,7 +230,7 @@ namespace Test
 			g_switches = 0;
 			g_lastKind = -1;
 			if (follower) g_lastPos = follower->GetPosition();
-			g_trace << "# run " << g_run + 1 << " scenario " << g_cfg.scenario << '\n';
+			g_trace << "# run " << g_run + 1 << " scenario " << g_currentScenario << '\n';
 			g_phase = Phase::kRunning;
 			g_timer = 0.0f;
 		}
@@ -235,7 +257,7 @@ namespace Test
 				"  weapon switches seen: {}, mod wanted: {}\n"
 				"  damage dealt: melee {:.0f} ({} hits), ranged {:.0f} ({} hits); follower health {:.0f}\n"
 				"  reflexes: {} enemy attacks nearby; {} stepped out, {} blocked, {} bashed ({} of those avoided all damage), {} taken, {} punishes, {} zig-zag approaches; damage taken {:.0f}\n",
-				g_run + 1, g_cfg.scenario, a_why, g_timer, AliveSpawned(), g_spawned.size(), g_relocated,
+				g_run + 1, g_currentScenario, a_why, g_timer, AliveSpawned(), g_spawned.size(), g_relocated,
 				g_firstDamage < 0.0f ? std::string{ "never" } : std::format("{:.1f}s", g_firstDamage),
 				g_meleeNearTime, g_rangedNearTime, g_idleNearTime, g_meleeFarTime, g_rangedFarTime,
 				g_switches, info.pref == 1 ? "melee" : (info.pref == 2 ? "ranged" : "nothing"),
@@ -245,7 +267,7 @@ namespace Test
 			g_report.flush();
 			logger::info("[test] run {} ended: {}", g_run + 1, a_why);
 			++g_run;
-			if (g_run >= g_cfg.runs) {
+			if (g_run >= g_cfg.runs * static_cast<int>(g_cfg.scenarios.size())) {
 				g_report << "done\n";
 				g_report.flush();
 				g_phase = Phase::kDone;
@@ -334,6 +356,7 @@ namespace Test
 		g_report.open("Data/SKSE/Plugins/FollowersWithBrains_Test/report.txt", std::ios::trunc);
 		static MenuSink sink;
 		RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(&sink);
+		if (!g_cfg.commandDir.empty()) Tuning::SetExtraFile(std::filesystem::path{ g_cfg.commandDir } / "tuning.ini");
 		g_phase = Phase::kWaitMenu;
 	}
 
@@ -373,10 +396,31 @@ namespace Test
 			if (g_timer > 4.0f) LoadSave();
 			break;
 		case Phase::kDone:
-			if (g_timer > 1.0f) {
-				logger::info("[test] all runs done, quitting");
-				RE::Main::GetSingleton()->quitGame = true;
-				g_phase = Phase::kIdle;
+			if (!g_cfg.keepOpen) {
+				if (g_timer > 1.0f) {
+					logger::info("[test] all runs done, quitting");
+					RE::Main::GetSingleton()->quitGame = true;
+					g_phase = Phase::kIdle;
+				}
+			} else if (g_timer > 1.0f) {
+				// waiting for the next batch: next.ini has the same keys as the test config
+				g_timer = 0.0f;
+				const std::filesystem::path next = g_cfg.commandDir.empty() ?
+				                                       std::filesystem::path{ "Data/SKSE/Plugins/FollowersWithBrains_Test/next.ini" } :
+				                                       std::filesystem::path{ g_cfg.commandDir } / "next.ini";
+				std::error_code ec;
+				if (std::filesystem::exists(next, ec)) {
+					ReadConfig(next);
+					std::filesystem::remove(next, ec);
+					g_report.close();
+					g_report.open("Data/SKSE/Plugins/FollowersWithBrains_Test/report.txt", std::ios::trunc);
+					g_trace.close();
+					g_trace.open("Data/SKSE/Plugins/FollowersWithBrains_Test/trace.csv", std::ios::trunc);
+					g_trace << "time,distPlayer,target,distTarget,inCombat,held(1melee/2ranged),wanted,dealtMelee,dealtRanged,health\n";
+					g_run = 0;
+					logger::info("[test] next batch: {} x{}", g_cfg.scenario, g_cfg.runs);
+					LoadSave();
+				}
 			}
 			break;
 		default:

@@ -24,6 +24,9 @@ namespace Driver
 		float           stopDistance = 450.0f;  // charge/run: done this close; step back: done this far
 		bool            sprint = false;        // show the sprint animation if the graph has one
 		bool            holdWhileAttacked = false;  // step back: stay out until the target's swing is over
+		float           weave = 1.0f;          // charge: sideways share (1 = 45 degrees); step back: 1 = diagonal
+		float           flipMin = 0.25f;       // charge: seconds between side changes
+		float           flipMax = 0.6f;
 	};
 
 	bool Install();  // animation channel and action hooks (kDataLoaded)

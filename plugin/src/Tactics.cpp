@@ -27,7 +27,8 @@ namespace Tactics
 			auto& c = s->closeRangeData;
 			auto& l = s->longRangeData;
 			if (cfg.reflexes) {
-				g.avoidThreatChance = 1.0f;                                  // dodge whatever can be dodged
+				// avoidThreatChance is left alone: the game's own threat avoidance turns and runs, which
+				// looks wrong in a duel; the plugin's reflexes do the dodging instead.
 				m.attackIncapacitatedMult = std::max(m.attackIncapacitatedMult, 2.0f);  // hit staggered enemies
 				m.powerAttackIncapacitatedMult = std::max(m.powerAttackIncapacitatedMult, 2.0f);
 				m.bashPowerAttackMult = std::max(m.bashPowerAttackMult, 2.0f);  // bash power attacks (needs a block)
@@ -70,7 +71,7 @@ namespace Tactics
 				e.tuned->flags = source->flags;
 			}
 			Tune(e.tuned);
-			logger::info("{}: tuned combat style (dodge {:.2f}, strafe {:.2f}, fallback {:.2f}, circle {:.2f})",
+			logger::info("{}: tuned combat style (avoid threats {:.2f}, strafe {:.2f}, fallback {:.2f}, circle {:.2f})",
 				a_follower->GetDisplayFullName(), e.tuned->generalData.avoidThreatChance, e.tuned->longRangeData.strafeMult,
 				e.tuned->closeRangeData.fallbackMult, e.tuned->closeRangeData.circleMult);
 		}

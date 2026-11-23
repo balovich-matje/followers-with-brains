@@ -100,6 +100,24 @@ namespace Driver
 			return g_drivenIds.contains(a_id);
 		}
 
+		// Only attacks and blocks are held off; drawing, sheathing and swapping weapons still go through.
+		bool IsAttackAction(RE::FormID a_action)
+		{
+			switch (a_action) {
+			case 0x13005:  // ActionRightAttack
+			case 0x13004:  // ActionLeftAttack
+			case 0x50C96:  // ActionDualAttack
+			case 0x13383:  // ActionRightPowerAttack
+			case 0x2E2F6:  // ActionLeftPowerAttack
+			case 0x2E2F7:  // ActionDualPowerAttack
+			case 0x193CE:  // ActionBlockAnticipate
+			case 0x13AF4:  // ActionBlockHit
+				return true;
+			default:
+				return false;
+			}
+		}
+
 		struct ActionHook
 		{
 			using Fn = bool (*)(RE::TESActionData*);
@@ -108,7 +126,10 @@ namespace Driver
 			// whichever thread runs the actor's AI: no swings or blocks of its own while we drive it
 			static bool Thunk(RE::TESActionData* a_this)
 			{
-				if (a_this && a_this->source && IsDrivenId(a_this->source->GetFormID())) return false;
+				if (a_this && a_this->source && a_this->action && IsAttackAction(a_this->action->GetFormID()) &&
+					IsDrivenId(a_this->source->GetFormID())) {
+					return false;
+				}
 				return original(a_this);
 			}
 		};
@@ -230,10 +251,11 @@ namespace Driver
 					// with it. Straight in for the last stretch.
 					if (d.elapsed >= d.nextFlip) {
 						d.side = -d.side;
-						d.nextFlip = d.elapsed + 0.25f + static_cast<float>(std::rand() % 35) / 100.0f;
+						float span = std::max(0.0f, d.order.flipMax - d.order.flipMin);
+						d.nextFlip = d.elapsed + d.order.flipMin + span * static_cast<float>(std::rand() % 100) / 100.0f;
 					}
 					RE::NiPoint3 across{ -toDir.y, toDir.x, 0.0f };
-					float        weave = dist > d.order.stopDistance + 250.0f ? 1.0f : 0.0f;  // tan(45 deg)
+					float        weave = dist > d.order.stopDistance + 250.0f ? d.order.weave : 0.0f;
 					RE::NiPoint3 aim = toDir + across * (weave * static_cast<float>(d.side));
 					move = aim / aim.Length();
 					face = Heading(toDir);
@@ -258,7 +280,7 @@ namespace Driver
 					}
 					// diagonal backpedal, as a player does it (measured ~450 units/s)
 					RE::NiPoint3 across{ -toDir.y, toDir.x, 0.0f };
-					RE::NiPoint3 back = toDir * -1.0f + across * static_cast<float>(d.side);
+					RE::NiPoint3 back = toDir * -1.0f + across * (d.order.weave * static_cast<float>(d.side));
 					move = back / back.Length();
 					face = Heading(toDir);
 					break;
