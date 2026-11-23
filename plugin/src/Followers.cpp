@@ -12,7 +12,6 @@ namespace Followers
 {
 	namespace
 	{
-		using Mode = Settings::FollowDistance;
 
 		// ------------------------------------------------------------------ tuning
 		struct ModeTuning
