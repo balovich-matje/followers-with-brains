@@ -153,11 +153,7 @@ namespace Followers
 			return a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kWaitingForPlayer) > 0.0f;
 		}
 
-		bool IsFollowing(RE::Actor* a)
-		{
-			auto package = a->GetCurrentPackage();
-			return package && package->packData.packType == RE::PACKAGE_PROCEDURE_TYPE::kFollow;
-		}
+		bool InScene(RE::Actor* a) { return a->GetCurrentScene() != nullptr; }
 
 		RE::Actor* CombatTarget(RE::Actor* a) { return Get(a->GetActorRuntimeData().currentCombatTarget); }
 
@@ -248,6 +244,16 @@ namespace Followers
 			}
 		}
 
+		// Leave combat and head back to the player.
+		void Disengage(RE::Actor* a, FollowerState& s)
+		{
+			Papyrus::StopCombat(a);
+			a->EvaluatePackage(true, false);
+			s.lastStop = g_time;
+			s.offsetMode = -1;  // combat may have dropped the offset: apply it again
+			s.offsetSlot = -1;
+		}
+
 		void ApplyOffset(RE::Actor* a, FollowerState& s, RE::PlayerCharacter* a_player, int a_mode, int a_slot)
 		{
 			if (s.offsetMode == a_mode && s.offsetSlot == a_slot) return;
@@ -255,6 +261,7 @@ namespace Followers
 			float side = a_slot == 0 ? 0.0f : (a_slot % 2 ? 1.0f : -1.0f) * t.side * static_cast<float>((a_slot + 1) / 2);
 			float back = -(t.back + 50.0f * static_cast<float>((a_slot + 1) / 2));
 			Papyrus::KeepOffset(a, a_player, side, back, t.catchUpRadius, t.followRadius);
+			logger::info("{} keeps offset ({:.0f}, {:.0f}) mode {}", Name(a), side, back, a_mode);
 			s.offsetMode = a_mode;
 			s.offsetSlot = a_slot;
 		}
@@ -304,12 +311,12 @@ namespace Followers
 		}
 
 		// Best enemy for a follower: whoever is fighting the player first, then the closest to the player.
-		RE::Actor* PickEnemy(RE::Actor* a, const Scan& a_scan, RE::Actor* a_exclude = nullptr)
+		RE::Actor* PickEnemy(RE::Actor* a, const Scan& a_scan, RE::Actor* a_exclude = nullptr, float a_maxFromPlayer = kEnemyRange)
 		{
 			RE::Actor* best = nullptr;
 			float      bestScore = std::numeric_limits<float>::max();
 			for (auto enemy : a_scan.enemies) {
-				if (enemy == a_exclude || !TargetsParty(enemy, a_scan)) continue;
+				if (enemy == a_exclude || !TargetsParty(enemy, a_scan) || Dist(enemy, a_scan.player) > a_maxFromPlayer) continue;
 				float score = Dist(enemy, a_scan.player) * 0.6f + Dist(enemy, a) * 0.4f;
 				if (CombatTarget(enemy) == a_scan.player) score -= 400.0f;
 				if (score < bestScore) {
@@ -440,13 +447,13 @@ namespace Followers
 				if (gained > 150.0f && moved > 200.0f && !attacking && !healing) {
 					g_retreating = true;
 					g_retreatStart = g_time;
-					Debug("Retreat!");
+					Debug(std::format("Retreat! (gained {:.0f}, moved {:.0f})", gained, moved));
 				}
 			} else {
 				auto  old = sampleAgo(1.5f);
 				float moved = old ? now.GetDistance(old->playerPos) : 1000.0f;
 				bool  stopped = old && g_time - old->time > 1.2f && moved < 60.0f;
-				if (g_lastPlayerAttack > g_retreatStart || healing || stopped || nearest > 4000.0f) {
+				if (g_lastPlayerAttack > g_retreatStart || healing || stopped) {
 					g_retreating = false;
 					Debug("Retreat over");
 				}
@@ -536,7 +543,7 @@ namespace Followers
 			bool  inCombat = f->IsInCombat();
 			bool  waiting = IsWaiting(f);
 			auto  state = f->AsActorState();
-			bool  busy = waiting || f->IsOnMount() || player->IsOnMount() ||
+			bool  busy = waiting || InScene(f) || f->IsOnMount() || player->IsOnMount() ||
 			            state->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal;
 			bool  sameSpace = f->GetWorldspace() == player->GetWorldspace() &&
 			                 (player->GetWorldspace() || f->GetParentCell() == player->GetParentCell());
@@ -546,16 +553,14 @@ namespace Followers
 			if (g_retreating && !waiting) {
 				bool rangedClose = IsRanged(f) && dist < cfg.rangedRetreatDistance;
 				disengage = !rangedClose;
-				if (disengage && inCombat && g_time - s.lastStop > 0.5f) {
-					Papyrus::StopCombat(f);
-					s.lastStop = g_time;
+				if (disengage && inCombat && g_time - s.lastStop > 1.0f) {
+					Disengage(f, s);
 					inCombat = false;
 				}
 			}
 
 			// ---- keep-offset follow (out of combat)
-			bool wantOffset = !inCombat && !busy && sameSpace && dist < 4000.0f &&
-			                  (IsFollowing(f) || s.offsetMode >= 0) && (mode != 2 || disengage);
+			bool wantOffset = (!inCombat || disengage) && !busy && sameSpace && dist < 4000.0f && (mode != 2 || disengage);
 			if (wantOffset) {
 				ApplyOffset(f, s, player, disengage ? 0 : mode, a_slot);
 			} else {
@@ -597,7 +602,8 @@ namespace Followers
 				s.stuckSince = -1.0f;
 				// join the fight when the player is fighting and nobody told us
 				if (!disengage && !waiting && !g_retreating && cfg.awareness && player->IsInCombat()) {
-					if (auto enemy = PickEnemy(f, a_scan); enemy && Dist(enemy, player) < 2500.0f && g_time - s.lastRetarget > 1.0f) {
+					float reach = cfg.combatLeash ? tune.combatLeash : 2500.0f;
+					if (auto enemy = PickEnemy(f, a_scan, nullptr, reach); enemy && g_time - s.lastRetarget > 1.0f && g_time - s.lastStop > 3.0f) {
 						StartCombat(f, s, enemy, "joining your fight");
 					}
 				}
@@ -608,7 +614,7 @@ namespace Followers
 
 			// ---- retarget when the target is gone
 			if (cfg.retarget && !Alive(target) && g_time - s.lastRetarget > 0.5f) {
-				if (auto next = PickEnemy(f, a_scan)) StartCombat(f, s, next, "next enemy");
+				if (auto next = PickEnemy(f, a_scan, nullptr, cfg.combatLeash ? tune.combatLeash : kEnemyRange)) StartCombat(f, s, next, "next enemy");
 				return;
 			}
 			if (!target) return;
@@ -617,10 +623,10 @@ namespace Followers
 			if (cfg.combatLeash && dist > tune.combatLeash && Dist(target, player) > tune.combatLeash * 0.8f &&
 				g_time - s.lastLeash > 6.0f) {
 				s.lastLeash = g_time;
-				if (auto closer = PickEnemy(f, a_scan); closer && Dist(closer, player) < tune.combatLeash) {
+				if (auto closer = PickEnemy(f, a_scan, nullptr, tune.combatLeash)) {
 					StartCombat(f, s, closer, "too far from you");
 				} else {
-					Papyrus::StopCombat(f);
+					Disengage(f, s);
 					Debug(std::format("{} falls back to you", Name(f)));
 				}
 				return;
