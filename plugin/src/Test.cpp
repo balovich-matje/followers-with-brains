@@ -16,9 +16,10 @@ namespace Test
 		};
 
 		// Base actors from Skyrim.esm (leveled to the player like any bandit).
-		constexpr RE::FormID kBanditMelee = 0x1BCD8;   // EncBandit01Melee1HNordM
-		constexpr RE::FormID kBanditArcher = 0x37C00;  // EncBandit01MissileNordM
-		constexpr RE::FormID kBerserker = 0x3DEA5;     // EncBandit02Melee2HBerserkNordM (power attacks a lot)
+		// Level 25 bandits (the follower's level), so level-difference damage scaling doesn't skew results.
+		constexpr RE::FormID kBanditMelee = 0x39D21;   // EncBandit06Melee1HNordM
+		constexpr RE::FormID kBanditArcher = 0x37C47;  // EncBandit06MissileNordM
+		constexpr RE::FormID kBerserker = 0x3DE83;     // EncBandit06Melee2HBerserkNordM (power attacks a lot)
 
 		std::vector<Spawn> Scenario(std::string_view a_name)
 		{
@@ -37,7 +38,7 @@ namespace Test
 			std::string scenario = "mixed";
 			int         runs = 3;
 			float       duration = 60.0f;
-			float       enemyHealth = 1500.0f;  // extra health for spawned enemies, so fights last
+			float       enemyHealth = 0.0f;  // optional extra health for spawned enemies
 		} g_cfg;
 
 		enum class Phase
@@ -192,7 +193,7 @@ namespace Test
 				if (!actor) continue;
 				Placement place{ std::sqrt(spawn.forward * spawn.forward + spawn.side * spawn.side), std::atan2(spawn.side, spawn.forward) };
 				Place(actor, place);
-				actor->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, g_cfg.enemyHealth);
+				if (g_cfg.enemyHealth > 0.0f) actor->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, g_cfg.enemyHealth);
 				Papyrus::StartCombat(actor, follower ? follower : static_cast<RE::Actor*>(player));
 				g_spawned.push_back(actor->GetHandle());
 				g_placements.push_back(place);

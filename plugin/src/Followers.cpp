@@ -710,11 +710,18 @@ namespace Followers
 			float hit = Loadout::HitDamage(e, f, e->GetEquippedEntryData(false)) * mult;
 			float health = f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
 			float share = health > 0.0f ? hit / health : 1.0f;
-			// Bashing on command does not work yet (the animation event is ignored): step out instead.
-			bool  bashable = false;
+			// Bashing needs a block: a shield, a two-handed weapon, or one weapon with the other hand free.
+			// Dual wielders can't block, so they can't bash. Enemies that shrug bashes off are remembered.
+			auto  right = f->GetEquippedObject(false);
+			auto  left = f->GetEquippedObject(true);
+			auto  rightWeap = right ? right->As<RE::TESObjectWEAP>() : nullptr;
+			bool  canBlock = (left && left->IsArmor()) ||
+			                (rightWeap && (rightWeap->IsTwoHandedSword() || rightWeap->IsTwoHandedAxe())) ||
+			                (rightWeap && rightWeap->IsMelee() && !left);
+			bool  bashable = canBlock && g_bashFails[e->GetFormID()] < 2 && Dist(f, e) < 200.0f;
 
 			const char* what = nullptr;
-			if (power && bashable && Loadout::Read(f).HasMelee()) {
+			if (power && bashable) {
 				f->NotifyAnimationGraph("blockStart"sv);
 				f->NotifyAnimationGraph("bashStart"sv);
 				r.action = 3;
