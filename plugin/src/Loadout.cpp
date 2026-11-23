@@ -71,12 +71,19 @@ namespace Loadout
 				if (!slot || ammo->data.damage > slot->data.damage) slot = ammo;
 			}
 		}
+		// Ammo the follower already has nocked counts too (some followers carry it outside the inventory list).
+		if (auto current = a_actor->GetCurrentAmmo()) {
+			auto& slot = current->IsBolt() ? bolts : arrows;
+			if (!slot) slot = current;
+		}
 		if (bow && arrows) {
 			out.bow = bow;
 			out.ammo = arrows;
 		} else if (crossbow && bolts) {
 			out.bow = crossbow;
 			out.ammo = bolts;
+		} else {
+			out.unusableBow = bow ? bow : crossbow;
 		}
 
 		if (auto npc = a_actor->GetActorBase()) {

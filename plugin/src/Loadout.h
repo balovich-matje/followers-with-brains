@@ -8,6 +8,7 @@ namespace Loadout
 		RE::TESObjectWEAP* melee = nullptr;     // best melee weapon carried
 		RE::TESObjectWEAP* bow = nullptr;       // best bow/crossbow carried (only with ammo)
 		RE::TESAmmo*       ammo = nullptr;
+		RE::TESObjectWEAP* unusableBow = nullptr;  // carried, but no ammo for it
 		RE::SpellItem*     spell = nullptr;     // best aimed attack spell known
 		float              meleeSkill = 0.0f;
 		float              rangedSkill = 0.0f;

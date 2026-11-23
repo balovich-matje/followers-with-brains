@@ -24,13 +24,13 @@ namespace Followers
 		constexpr ModeTuning kTuning[3] = {
 			{ 130.0f, 70.0f, 150.0f, 50.0f, 350.0f, 1500.0f, 900.0f },     // close
 			{ 320.0f, 110.0f, 500.0f, 180.0f, 700.0f, 2200.0f, 1500.0f },  // medium
-			{ 0.0f, 0.0f, 0.0f, 0.0f, 1100.0f, 3200.0f, 2500.0f },         // far
+			{ 0.0f, 0.0f, 0.0f, 0.0f, 2200.0f, 6400.0f, 5000.0f },         // far
 		};
 
 		constexpr float kSpeedBoost = 50.0f;
 		constexpr float kLogicInterval = 0.1f;
 		constexpr float kTeleportDelay = 3.0f;
-		constexpr float kEnemyRange = 5000.0f;
+		constexpr float kEnemyRange = 7000.0f;
 		constexpr float kSummonerReach = 2500.0f;
 		constexpr float kWatchSeconds = 1.2f;
 		constexpr float kMarkSeconds = 15.0f;
@@ -251,18 +251,23 @@ namespace Followers
 		void SetFleeing(RE::Actor* a, FollowerState& s, bool a_flee)
 		{
 			if (a_flee == s.avMods.contains(RE::ActorValue::kConfidence)) return;
-			if (a_flee) {
-				float confidence = a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kConfidence);
-				if (confidence > 0.0f) SetMod(a, s, RE::ActorValue::kConfidence, -confidence);
-			} else {
-				SetMod(a, s, RE::ActorValue::kConfidence, 0.0f);
-			}
+			(void)a_flee;  // cowardice made followers shout surrender lines: no longer used, only undone
+			SetMod(a, s, RE::ActorValue::kConfidence, 0.0f);
 		}
 
 		const Loadout::Options& GetLoadout(RE::Actor* a, FollowerState& s)
 		{
 			if (g_time - s.loadoutTime > 5.0f) {
-				s.loadout = Loadout::Read(a);
+				auto next = Loadout::Read(a);
+				if (s.loadoutTime < 0.0f || next.melee != s.loadout.melee || next.bow != s.loadout.bow ||
+					next.spell != s.loadout.spell || next.ammo != s.loadout.ammo) {
+					logger::info("{} loadout: melee {} ({:.0f}), ranged {} ({:.0f}), ammo {}{}", Name(a),
+						next.melee ? next.melee->GetName() : "-", next.meleeSkill,
+						next.bow ? next.bow->GetName() : (next.spell ? next.spell->GetName() : "-"), next.rangedSkill,
+						next.ammo ? next.ammo->GetName() : "-",
+						next.unusableBow ? std::format(", {} has no ammo", next.unusableBow->GetName()) : std::string{});
+				}
+				s.loadout = next;
 				s.loadoutTime = g_time;
 			}
 			return s.loadout;
@@ -639,8 +644,8 @@ namespace Followers
 					if (cfg.smartWeapons) UpdateWeapons(f, s, CombatTarget(f), true);
 					SetFleeing(f, s, false);
 				} else {
-					if (inCombat && g_time - s.lastStop > 1.0f) Disengage(f, s);
-					SetFleeing(f, s, true);
+					if (inCombat && g_time - s.lastStop > 0.3f) Disengage(f, s);
+					SetFleeing(f, s, false);
 				}
 			} else {
 				SetFleeing(f, s, false);
