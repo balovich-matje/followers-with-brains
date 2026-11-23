@@ -710,7 +710,8 @@ namespace Followers
 			float hit = Loadout::HitDamage(e, f, e->GetEquippedEntryData(false)) * mult;
 			float health = f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
 			float share = health > 0.0f ? hit / health : 1.0f;
-			bool  bashable = g_bashFails[e->GetFormID()] < 2 && f->GetEquippedObject(false) && Dist(f, e) < 200.0f;
+			// Bashing on command does not work yet (the animation event is ignored): step out instead.
+			bool  bashable = false;
 
 			const char* what = nullptr;
 			if (power && bashable && Loadout::Read(f).HasMelee()) {
