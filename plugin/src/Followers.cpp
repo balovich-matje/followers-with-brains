@@ -125,6 +125,18 @@ namespace Followers
 		// which can run on worker threads.
 		std::mutex                                 g_prefLock;
 		std::unordered_map<RE::FormID, int>        g_weaponPref;
+		std::atomic<int>                           g_scoreCalls{ 0 };
+		std::atomic<int>                           g_equipVetoes{ 0 };
+
+		int GetWeaponPref(RE::CombatController* a_controller)
+		{
+			if (!a_controller) return 0;
+			auto attacker = a_controller->attackerHandle.get();
+			if (!attacker) return 0;
+			std::scoped_lock lock{ g_prefLock };
+			auto it = g_weaponPref.find(attacker->GetFormID());
+			return it == g_weaponPref.end() ? 0 : it->second;
+		}
 
 		void SetWeaponPref(RE::Actor* a, int a_pref)
 		{
@@ -314,6 +326,7 @@ namespace Followers
 				if (++s.overrides >= 2) {
 					s.respectAIUntil = g_time + 20.0f;
 					s.overrides = 0;
+					logger::info("  combat AI hooks so far: {} rating changes, {} refused equips", g_scoreCalls.load(), g_equipVetoes.load());
 					Debug(std::format("{} keeps their own weapon choice for now", Name(a)));
 					return;
 				}
@@ -949,17 +962,26 @@ namespace Followers
 			static float thunk(RE::CombatInventoryItem* a_item, RE::CombatController* a_controller)
 			{
 				float score = func(a_item, a_controller);
-				if (!a_controller) return score;
-				auto attacker = a_controller->attackerHandle.get();
-				if (!attacker) return score;
-				int pref = 0;
-				{
-					std::scoped_lock lock{ g_prefLock };
-					auto it = g_weaponPref.find(attacker->GetFormID());
-					if (it == g_weaponPref.end()) return score;
-					pref = it->second;
-				}
+				int   pref = GetWeaponPref(a_controller);
+				if (pref == 0) return score;
+				++g_scoreCalls;
 				return pref == Kind ? score * 10.0f + 10.0f : score * 0.05f;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Refuse to draw the other kind of weapon at all while the mod has made a choice.
+		template <int Kind>
+		struct ItemShouldEquip
+		{
+			static bool thunk(RE::CombatInventoryItem* a_item, RE::CombatController* a_controller)
+			{
+				int pref = GetWeaponPref(a_controller);
+				if (pref != 0 && pref != Kind) {
+					++g_equipVetoes;
+					return false;
+				}
+				return func(a_item, a_controller);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -1051,8 +1073,10 @@ namespace Followers
 		HealthDamage::func = characterVtbl.write_vfunc(0x104, HealthDamage::thunk);
 		REL::Relocation<std::uintptr_t> meleeVtbl{ RE::VTABLE_CombatInventoryItemMelee[0] };
 		ItemScore<1>::func = meleeVtbl.write_vfunc(0x0C, ItemScore<1>::thunk);
+		ItemShouldEquip<1>::func = meleeVtbl.write_vfunc(0x0F, ItemShouldEquip<1>::thunk);
 		REL::Relocation<std::uintptr_t> rangedVtbl{ RE::VTABLE_CombatInventoryItemRanged[0] };
 		ItemScore<2>::func = rangedVtbl.write_vfunc(0x0C, ItemScore<2>::thunk);
+		ItemShouldEquip<2>::func = rangedVtbl.write_vfunc(0x0F, ItemShouldEquip<2>::thunk);
 
 		auto holder = RE::ScriptEventSourceHolder::GetSingleton();
 		holder->AddEventSink<RE::TESHitEvent>(Sink::Get());

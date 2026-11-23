@@ -16,3 +16,4 @@ using namespace std::literals;
 #include <vector>
 #include <map>
 #include <tuple>
+#include <atomic>
