@@ -1097,7 +1097,7 @@ namespace Followers
 
 		void UpdateReflexes()
 		{
-			if (!Settings::Get().reflexes || !Settings::Get().combatMovement) return;
+			if (!Settings::Get().reflexes) return;  // dodges work with or without the movement switch
 			for (auto it = g_pendingCheck.begin(); it != g_pendingCheck.end();) {
 				if (g_time - *it < 1.2f) {
 					++it;

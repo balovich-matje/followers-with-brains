@@ -42,7 +42,7 @@ Event OnConfigInit()
 	_toggleNames = new String[12]
 	_toggleInfo = new String[12]
 	_toggleOIDs = new Int[12]
-	SetToggle(0, "CombatMovement", "Control movement in combat", "The mod moves followers in fights: charging shooters, stepping out of big hits, keeping to the combat distance, retreating with you and taking your route to enemies the game can't path to. Off: the game's own combat movement.")
+	SetToggle(0, "CombatMovement", "Control movement in combat", "The mod moves followers around in fights: charging shooters, keeping to the combat distance, retreating with you and taking your route to enemies the game can't path to. Off: the game's own combat movement. Reflexes (dodging big hits) work either way.")
 	SetToggle(1, "OutsideMovement", "Control movement out of combat", "The mod moves followers outside fights: keeping to the following distance and formation, catching up, jumping after you, taking your route and relaxing in safe places. Off: the game's own following.")
 	SetToggle(2, "Awareness", "Combat awareness", "Followers get ready when you aim at or watch an enemy, attack the moment you do, and join fights you are in.")
 	SetToggle(3, "Retarget", "Next target right away", "When their target dies, followers move straight on to the next enemy fighting you.")
