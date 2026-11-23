@@ -392,6 +392,37 @@ namespace Followers
 			}
 		}
 
+		// The area a follower keeps around the player (placement only applies to Close following).
+		Driver::Order FormationOrder(int a_mode)
+		{
+			Driver::Order order;
+			order.kind = Driver::Kind::kFormation;
+			int placement = a_mode == 0 ? std::clamp(Settings::Get().placement, 0, 2) : 0;
+			float scale = a_mode == 0 ? 1.0f : 1.8f;  // medium: the same areas, further out
+			switch (placement) {
+			case 1:  // either side
+				order.zoneAngle = 90.0f;
+				order.zoneHalf = 35.0f;
+				order.zoneNear = 120.0f * scale;
+				order.zoneFar = 350.0f * scale;
+				order.zoneMirror = true;
+				break;
+			case 2:  // ahead
+				order.zoneAngle = 0.0f;
+				order.zoneHalf = 30.0f;
+				order.zoneNear = 180.0f * scale;
+				order.zoneFar = 400.0f * scale;
+				break;
+			default:  // behind
+				order.zoneAngle = 180.0f;
+				order.zoneHalf = 40.0f;
+				order.zoneNear = 120.0f * scale;
+				order.zoneFar = 320.0f * scale;
+				break;
+			}
+			return order;
+		}
+
 		RE::NiPoint3 SpotInWorld(RE::Actor* a_player, RE::NiPoint2 a_spot)
 		{
 			float z = a_player->GetAngleZ();
@@ -1122,15 +1153,11 @@ namespace Followers
 				} else {
 					s.pathNoted = false;
 				}
-				auto  spotLocal = OffsetSpot(mode, a_slot);
-				auto  spot = SpotInWorld(player, spotLocal);
-				float gap = f->GetPosition().GetDistance(spot);
-				if (g_time >= s.pathUntil && (gap > 60.0f || player->IsMoving()) && Driver::ClearLine(f, f->GetPosition(), spot)) {
-					Driver::Order order;
-					order.kind = Driver::Kind::kFormation;
-					order.target = player->GetHandle();
-					order.spotX = spotLocal.x;
-					order.spotY = spotLocal.y;
+				Driver::Order order = FormationOrder(mode);
+				order.target = player->GetHandle();
+				RE::NiPoint3 nearest;
+				float        gap = Driver::ZoneGap(order, f, player, &nearest);
+				if (g_time >= s.pathUntil && (gap > 40.0f || player->IsMoving()) && Driver::ClearLine(f, f->GetPosition(), nearest)) {
 					order.speed = Tuning::Get().chargeSpeed;  // a run
 					order.sprintSpeed = 715.0f;               // a player's sprint (measured)
 					order.duration = 3600.0f;

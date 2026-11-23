@@ -28,8 +28,12 @@ namespace Driver
 		float           weave = 1.0f;          // charge: sideways share (1 = 45 degrees); step back: 1 = diagonal
 		float           flipMin = 0.25f;       // charge: seconds between side changes
 		float           flipMax = 0.6f;
-		float           spotX = 0.0f;          // formation: right of the target
-		float           spotY = -130.0f;       // formation: ahead of the target (negative = behind)
+		// formation: an area around the target, in the target's frame (angle 0 = ahead, +90 = right)
+		float           zoneAngle = 180.0f;    // degrees: centre of the area (behind)
+		float           zoneHalf = 40.0f;      // degrees either side of the centre
+		float           zoneNear = 120.0f;     // units from the target
+		float           zoneFar = 320.0f;
+		bool            zoneMirror = false;    // side placement: either side, whichever the follower is on
 		float           sprintSpeed = 715.0f;  // formation: top speed while the target sprints
 	};
 
@@ -44,6 +48,10 @@ namespace Driver
 	// True when nothing solid (terrain, walls, rocks, fences) lies on the straight line between the
 	// two points, at chest height. People are ignored.
 	bool ClearLine(RE::Actor* a_actor, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to);
+
+	// Formation area helpers: where in a_target's frame a_actor stands, and the nearest point of the
+	// order's area (in world space). Returns the distance to the area (0 inside).
+	float ZoneGap(const Order& a_order, RE::Actor* a_actor, RE::Actor* a_target, RE::NiPoint3* a_nearest = nullptr);
 
 	// Why the last drive of this actor ended (for logs and tests).
 	const char* LastEnd(RE::Actor* a_actor);
