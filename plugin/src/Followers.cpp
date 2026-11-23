@@ -717,7 +717,7 @@ namespace Followers
 				r.bashTime = g_time;
 				++g_stats.bashes;
 				what = "bash";
-			} else if (power || share > 0.2f) {
+			} else if (power || share > 0.08f || health < f->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kHealth) * 0.5f) {
 				if (!power && HasShield(f)) {
 					f->NotifyAnimationGraph("blockStart"sv);
 					r.action = 2;
@@ -740,6 +740,8 @@ namespace Followers
 				}
 			} else {
 				++g_stats.taken;
+				logger::info("{}: takes {} from {} ({:.0f} dmg, {:.0f}% hp)", Name(f), power ? "power attack" : "attack", Name(e), hit, share * 100.0f);
+				r.cooldownUntil = g_time + 0.3f;
 				return;
 			}
 			r.against = e->GetHandle();
@@ -798,7 +800,15 @@ namespace Followers
 
 					bool starting = prev == RE::ATTACK_STATE_ENUM::kNone &&
 					                (state == RE::ATTACK_STATE_ENUM::kDraw || state == RE::ATTACK_STATE_ENUM::kSwing);
-					if (starting && CombatTarget(e) == f && r.action == 0 && g_time >= r.cooldownUntil) {
+					// the attack is meant for us if we are its target, or we are in front of it and within reach
+					bool aimedAtUs = CombatTarget(e) == f;
+					if (!aimedAtUs && d < 350.0f) {
+						RE::NiPoint3 toF = f->GetPosition() - e->GetPosition();
+						float len = std::sqrt(toF.x * toF.x + toF.y * toF.y);
+						auto  fwd = Forward(e);
+						aimedAtUs = len > 1.0f && (toF.x * fwd.x + toF.y * fwd.y) / len > 0.5f;
+					}
+					if (starting && aimedAtUs && r.action == 0 && g_time >= r.cooldownUntil) {
 						ReactToAttack(f, e, r);
 					}
 				}
