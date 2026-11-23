@@ -1181,7 +1181,8 @@ namespace Followers
 			float best = std::numeric_limits<float>::max();
 			for (auto& h : g_lastEnemies) {
 				auto e = Get(h);
-				if (Alive(e)) best = std::min(best, Dist(f, e));
+				// an enemy up on a wall or down a drop can't hit her in melee: it doesn't count as close
+				if (Alive(e) && std::fabs(e->GetPosition().z - f->GetPosition().z) < 150.0f) best = std::min(best, Dist(f, e));
 			}
 			return best;
 		}
