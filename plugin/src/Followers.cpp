@@ -939,7 +939,7 @@ namespace Followers
 			order.duration = 10.0f;
 			order.sprint = true;
 			if (!Driver::Start(f, order)) return false;
-			g_nextCharge[f->GetFormID()] = g_time + 4.0f;
+			g_nextCharge[f->GetFormID()] = g_time + 1.5f;
 			++g_stats.zigzags;
 			Debug(std::format("{} charges {}", Name(f), Name(a_target)));
 			return true;

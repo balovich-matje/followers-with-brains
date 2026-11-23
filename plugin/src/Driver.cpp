@@ -353,7 +353,8 @@ namespace Driver
 			auto         ahead = Cast(a, world, pos + chest, pos + chest + move * (step + 40.0f));
 			if (ahead.hit && ahead.ref != a) {
 				if (ahead.ref == target) return "arrived";
-				return "blocked";
+				// people (the player, other followers) step aside or get pushed; only walls and rocks stop a drive
+				if (!ahead.ref || !ahead.ref->Is(RE::FormType::ActorCharacter)) return "blocked";
 			}
 			// stay on the ground; don't step off ledges or up big steps
 			auto ground = Cast(a, world, next + RE::NiPoint3{ 0.0f, 0.0f, 80.0f }, next - RE::NiPoint3{ 0.0f, 0.0f, 160.0f });
