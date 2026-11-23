@@ -49,6 +49,8 @@ namespace Followers
 			float offsetApplied = -100.0f;
 			float pathUntil = 0.0f;   // let the game's own (pathfinding) follow work until then
 			bool  pathNoted = false;
+			int   blockedCount = 0;
+			float driveStarted = -100.0f;
 			bool  formationDrive = false;
 			float speedBoost = 0.0f;
 			std::map<RE::ActorValue, float> avMods;  // temporary actor value changes we made
@@ -397,9 +399,15 @@ namespace Followers
 		{
 			Driver::Order order;
 			order.kind = Driver::Kind::kFormation;
-			int placement = a_mode == 0 ? std::clamp(Settings::Get().placement, 0, 2) : 0;
-			float scale = a_mode == 0 ? 1.0f : 1.8f;  // medium: the same areas, further out
+			int placement = a_mode == 0 ? std::clamp(Settings::Get().placement, 0, 3) : 3;
+			float scale = a_mode == 0 ? 1.0f : 1.8f;  // medium: around the player, further out
 			switch (placement) {
+			case 3:  // anywhere around the player
+				order.zoneAngle = 180.0f;
+				order.zoneHalf = 180.0f;
+				order.zoneNear = 120.0f * scale;
+				order.zoneFar = 330.0f * scale;
+				break;
 			case 1:  // either side
 				order.zoneAngle = 90.0f;
 				order.zoneHalf = 35.0f;
@@ -1147,25 +1155,32 @@ namespace Followers
 				std::string_view lastEnd = Driver::LastEnd(f);
 				if (lastEnd == "blocked" || lastEnd == "edge" || lastEnd == "step" || lastEnd == "too far") {
 					if (!s.pathNoted) {
-						s.pathUntil = g_time + 2.0f;  // let the game's pathfinding get round it
+						// let the game's pathfinding (and traversal mods) get round it, longer each time
+						s.blockedCount = std::min(s.blockedCount + 1, 4);
+						s.pathUntil = g_time + std::min(10.0f, 2.0f * static_cast<float>(1 << (s.blockedCount - 1)));
 						s.pathNoted = true;
 					}
-				} else {
-					s.pathNoted = false;
+				} else if (!s.pathNoted) {
+					s.blockedCount = 0;
 				}
 				Driver::Order order = FormationOrder(mode);
 				order.target = player->GetHandle();
 				RE::NiPoint3 nearest;
 				float        gap = Driver::ZoneGap(order, f, player, &nearest);
-				if (g_time >= s.pathUntil && (gap > 40.0f || player->IsMoving()) && Driver::ClearLine(f, f->GetPosition(), nearest)) {
+				// a climb or a drop (the player up a rock, down a ledge) is the game's and traversal mods' job
+				float height = std::fabs(player->GetPosition().z - f->GetPosition().z);
+				if (g_time >= s.pathUntil && height < 80.0f && (gap > 40.0f || player->IsMoving()) &&
+					Driver::ClearLine(f, f->GetPosition(), nearest)) {
 					order.speed = Tuning::Get().chargeSpeed;  // a run
 					order.sprintSpeed = 715.0f;               // a player's sprint (measured)
 					order.duration = 3600.0f;
 					if (Driver::Start(f, order)) s.pathNoted = false;
+					s.driveStarted = g_time;
 				}
 			} else if (!formation && Driver::IsDriving(f) && s.formationDrive) {
 				Driver::Stop(f);
 			}
+			if (s.formationDrive && Driver::IsDriving(f) && g_time - s.driveStarted > 3.0f) s.blockedCount = 0;
 			s.formationDrive = formation && Driver::IsDriving(f);
 
 			// ---- catch-up speed and teleport

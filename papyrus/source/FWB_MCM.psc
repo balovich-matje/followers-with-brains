@@ -14,7 +14,7 @@ String[] _toggleInfo
 Int[] _toggleOIDs
 
 Int Function GetVersion()
-	Return 4
+	Return 5
 EndFunction
 
 Event OnVersionUpdate(Int a_version)
@@ -34,10 +34,11 @@ Event OnConfigInit()
 	_distanceNames[1] = "Medium"
 	_distanceNames[2] = "Far"
 
-	_placementNames = new String[3]
+	_placementNames = new String[4]
 	_placementNames[0] = "Behind you"
 	_placementNames[1] = "At your side"
 	_placementNames[2] = "Ahead of you"
+	_placementNames[3] = "Around you"
 
 	_toggleKeys = new String[13]
 	_toggleNames = new String[13]
@@ -81,7 +82,7 @@ EndFunction
 
 Event OnPageReset(String a_page)
 	; a save made with an older version still has the old, shorter option lists
-	If !_toggleKeys || _toggleKeys.Length < 13 || !_toggleKeys[12] || !_placementNames
+	If !_toggleKeys || _toggleKeys.Length < 13 || !_toggleKeys[12] || !_placementNames || _placementNames.Length < 4
 		OnConfigInit()
 	EndIf
 	SetCursorFillMode(TOP_TO_BOTTOM)
@@ -194,7 +195,7 @@ Event OnOptionHighlight(Int a_option)
 	ElseIf a_option == _distanceOID
 		SetInfoText("Out of combat. Close: followers stay right next to you and move the moment you do.\nMedium: a looser follow.\nFar: the game's own follow distance.")
 	ElseIf a_option == _placementOID
-		SetInfoText("Where followers stay with Close following: behind you, at your side, or ahead of you (off to the right, out of your line of sight).")
+		SetInfoText("Where followers stay with Close following: behind you, at your side, ahead of you, or anywhere around you. Each is an area, not a fixed spot: followers move freely inside it.")
 	ElseIf a_option == _combatDistanceOID
 		SetInfoText("How far from you followers fight. Close: only enemies near you. Far: they range further. For 5 seconds after you heal a follower, they may go one step further.")
 	ElseIf a_option == _retreatDistanceOID

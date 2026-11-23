@@ -194,6 +194,8 @@ namespace Driver
 			float       pickAngle = 0.0f;
 			float       pickRange = 200.0f;
 			float       lastSpeed = 0.0f;
+			int         lastWeaponState = -1;
+			float       lastMoveKick = 0.0f;
 			bool        standing = false;    // formation: legs were stopped, restart them when moving again
 		};
 		std::unordered_map<RE::FormID, Drive>        g_drives;
@@ -483,14 +485,18 @@ namespace Driver
 				slot->direction.store(turns, std::memory_order_relaxed);
 				slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			}
-			// formation stands still and moves again many times: restart the legs when it sets off
-			if (d.order.kind == Kind::kFormation) {
-				if (speed < 20.0f) {
-					d.standing = true;
-				} else if (d.standing && speed > 60.0f) {
-					d.standing = false;
+			// Restart the legs when they may have dropped to a standing pose: setting off again after
+			// standing, drawing or sheathing a weapon (resets the graph), and every second while moving.
+			if (speed < 20.0f) {
+				d.standing = true;
+			} else if (speed > 60.0f) {
+				auto weaponState = static_cast<int>(state->GetWeaponState());
+				if (d.standing || weaponState != d.lastWeaponState || d.elapsed - d.lastMoveKick > 1.0f) {
 					d.moveSent = false;
+					d.lastMoveKick = d.elapsed;
 				}
+				d.standing = false;
+				d.lastWeaponState = weaponState;
 			}
 			if (!d.moveSent) {
 				bool took = Send(a, "moveStart"sv);
