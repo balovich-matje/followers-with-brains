@@ -1,6 +1,7 @@
 #include "Followers.h"
 #include "Papyrus.h"
 #include "Settings.h"
+#include "Test.h"
 
 namespace
 {
@@ -25,8 +26,12 @@ namespace
 		case SKSE::MessagingInterface::kDataLoaded:
 			Settings::Load();
 			Followers::Install();
+			Test::Install();
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
+			Followers::Reset();
+			Test::OnGameLoaded();
+			break;
 		case SKSE::MessagingInterface::kNewGame:
 			Followers::Reset();
 			break;

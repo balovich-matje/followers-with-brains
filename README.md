@@ -91,6 +91,11 @@ drawn) instead of waiting to see an animation, and react at once.
 `tools/build.sh` builds the SKSE plugin (CommonLibSSE-NG, clang-cl + xwin) and the Papyrus
 scripts (Caprica). `tools/make_esp.py` writes the plugin file that hosts the MCM.
 
+Test mode: put `Data/SKSE/Plugins/FollowersWithBrains_Test.ini` next to the plugin
+(`Save=`, `Scenario=mixed|melee_rush|archers`, `Runs=`, `Duration=`). From the main menu the plugin
+loads that save, spawns the scenario around the player, traces the first follower, writes
+`FollowersWithBrains_Test/report.txt` and `trace.csv`, repeats, then quits the game.
+
 ## Requirements
 - SKSE64 and Address Library for SKSE Plugins
 - SkyUI (for the MCM)

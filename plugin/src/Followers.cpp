@@ -2,6 +2,7 @@
 #include "Loadout.h"
 #include "Papyrus.h"
 #include "Settings.h"
+#include "Test.h"
 
 namespace Followers
 {
@@ -950,6 +951,7 @@ namespace Followers
 			{
 				func(a_player, a_delta);
 				Tick(a_delta);
+				Test::Tick(a_delta);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -1123,6 +1125,25 @@ namespace Followers
 		auto player = RE::PlayerCharacter::GetSingleton();
 		if (!player || !player->Is3DLoaded()) return;
 		RunLogic(player);
+	}
+
+	DebugInfo GetDebugInfo(RE::Actor* a_actor)
+	{
+		DebugInfo info;
+		if (!a_actor) return info;
+		{
+			std::scoped_lock lock{ g_prefLock };
+			auto it = g_weaponPref.find(a_actor->GetFormID());
+			if (it != g_weaponPref.end()) info.pref = it->second;
+		}
+		auto it = g_state.find(a_actor->GetFormID());
+		if (it != g_state.end()) {
+			for (int i = 0; i < 2; ++i) {
+				info.dealt[i] = it->second.dealt[i];
+				info.hits[i] = it->second.hits[i];
+			}
+		}
+		return info;
 	}
 
 	void OnSave(SKSE::SerializationInterface* a_intfc)
