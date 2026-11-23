@@ -61,6 +61,8 @@ namespace Followers
 			float unreachableUntil = 0.0f;    // melee could not reach its target recently
 			float engagingUntil = 0.0f;       // just told to attack: the game may not show combat yet
 			float lastFinish = -100.0f;
+			float lastSprintKick = -100.0f;
+			bool  mirroringSprint = false;
 			// measured damage while holding each kind of weapon (0 melee, 1 ranged)
 			float dealt[2]{};
 			float heldTime[2]{};
@@ -379,10 +381,10 @@ namespace Followers
 			float sign = a_slot % 2 ? 1.0f : -1.0f;
 			int   placement = a_mode == 0 ? std::clamp(Settings::Get().placement, 0, 2) : 0;
 			switch (placement) {
-			case 1:  // at the side, a step back
-				return { (a_slot == 0 ? 1.0f : -sign) * (140.0f + 60.0f * n), -30.0f - 40.0f * n };
-			case 2:  // ahead and to the right, out of the line of sight
-				return { (a_slot == 0 ? 1.0f : sign) * (110.0f + 50.0f * n), 170.0f + 40.0f * n };
+			case 1:  // at the side, level with the player
+				return { (a_slot == 0 ? 1.0f : -sign) * (130.0f + 60.0f * n), 10.0f - 30.0f * n };
+			case 2:  // ahead, nearly in the middle
+				return { (a_slot == 0 ? 30.0f : sign * (80.0f + 40.0f * n)), 200.0f + 40.0f * n };
 			default:  // behind
 				return { a_slot == 0 ? 0.0f : sign * t.side * n, -(t.back + 50.0f * n) };
 			}
@@ -1117,10 +1119,39 @@ namespace Followers
 			// ---- catch-up speed and teleport
 			bool travelling = (!inCombat || recalling) && !busy && sameSpace;
 			float boostAt = recalling ? 300.0f : tune.boostDistance;
+			// Close/Medium: a follower lagging behind her spot while the player moves gets faster in steps,
+			// so she keeps up with a player who runs faster than she does.
+			float lagBoost = 0.0f;
+			if (travelling && !inCombat && mode != 2 && s.offsetMode >= 0 && player->IsMoving()) {
+				float lag = f->GetPosition().GetDistance(SpotInWorld(player, OffsetSpot(mode, a_slot)));
+				if (lag > 90.0f) lagBoost = std::min(60.0f, std::floor((lag - 90.0f) / 40.0f + 1.0f) * 15.0f);
+			}
 			if (cfg.catchUp && travelling && dist > boostAt) {
 				SetBoost(f, s, kSpeedBoost);
-			} else if (s.speedBoost != 0.0f && (!travelling || dist < boostAt * 0.6f)) {
+			} else if (cfg.catchUp && lagBoost > 0.0f) {
+				SetBoost(f, s, lagBoost);
+			} else if (s.speedBoost != 0.0f && (!travelling || (dist < boostAt * 0.6f && lagBoost == 0.0f))) {
 				SetBoost(f, s, 0.0f);
+			}
+
+			// ---- sprint when the player sprints (out of combat, while moving with the player)
+			bool wantSprint = travelling && !inCombat && player->AsActorState()->IsSprinting() && f->IsMoving() && !Driver::IsDriving(f);
+			auto fstate = f->AsActorState();
+			if (wantSprint) {
+				fstate->actorState1.sprinting = 1;
+				bool still = false;
+				f->GetGraphVariableBool("IsSprinting", still);
+				if (!still && g_time - s.lastSprintKick > 0.4f) {
+					f->SetGraphVariableBool("IsSprinting", true);
+					f->NotifyAnimationGraph("SprintStart"sv);
+					s.lastSprintKick = g_time;
+				}
+				s.mirroringSprint = true;
+			} else if (s.mirroringSprint) {
+				fstate->actorState1.sprinting = 0;
+				f->SetGraphVariableBool("IsSprinting", false);
+				f->NotifyAnimationGraph("SprintStop"sv);
+				s.mirroringSprint = false;
 			}
 
 			if (cfg.teleport && travelling && !inCombat && dist > tune.teleportDistance) {
