@@ -23,6 +23,7 @@ namespace Driver
 		float           duration = 10.0f;      // seconds, at most
 		float           stopDistance = 450.0f;  // charge/run: done this close; step back: done this far
 		bool            sprint = false;        // show the sprint animation if the graph has one
+		bool            holdWhileAttacked = false;  // step back: stay out until the target's swing is over
 	};
 
 	bool Install();  // animation channel and action hooks (kDataLoaded)

@@ -759,11 +759,11 @@ namespace Followers
 					order.target = e->GetHandle();
 					order.speed = 480.0f;
 					order.stopDistance = Dist(f, e) + reach * 0.6f + 120.0f;
-					order.duration = power ? 0.7f : 0.5f;
+					order.duration = 1.8f;  // the drive ends when the swing is over
+					order.holdWhileAttacked = true;
 					Driver::Start(f, order);
 					r.action = 1;
-					r.until = g_time + (power ? 0.9f : 0.6f);
-					r.punishAt = r.until + 0.05f;
+					r.until = g_time + 2.0f;
 					++g_stats.stepOuts;
 					what = "step out";
 				}
@@ -806,15 +806,20 @@ namespace Followers
 						order.target = e->GetHandle();
 						order.speed = 480.0f;
 						order.stopDistance = Dist(f, e) + 250.0f;
-						order.duration = 0.6f;
+						order.duration = 1.8f;
+						order.holdWhileAttacked = true;
 						Driver::Start(f, order);
 						r.action = 1;
-						r.until = g_time + 0.7f;
-						r.punishAt = r.until + 0.05f;
+						r.until = g_time + 2.0f;
 						r.against = e->GetHandle();
 						++g_stats.stepOuts;
 						logger::info("{}: bash did not start, stepping out instead", Name(f));
 					}
+				}
+				// a step back is over once the driver lets go (the swing ended): go back in and punish
+				if (r.action == 1 && !Driver::IsDriving(f)) {
+					EndReflex(f, r);
+					r.punishAt = g_time;
 				}
 				if (r.action != 0 && g_time >= r.until) {
 					// a bash that did not stagger counts against that enemy
@@ -825,12 +830,28 @@ namespace Followers
 					EndReflex(f, r);
 				}
 				if (r.punishAt >= 0.0f && g_time >= r.punishAt) {
-					r.punishAt = -1.0f;
-					auto e = Get(r.against);
-					if (Alive(e) && Dist(f, e) < 400.0f && !IsRanged(f)) {
+					// close back in to our own reach, then strike
+					auto  e = Get(r.against);
+					float reach = 150.0f;
+					if (auto weap = f->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
+						reach = std::max(120.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
+					}
+					if (!Alive(e) || IsRanged(f) || g_time - r.punishAt > 1.5f) {
+						r.punishAt = -1.0f;
+					} else if (Dist(f, e) <= reach + 40.0f) {
+						Driver::Stop(f);
 						f->NotifyAnimationGraph("attackStart"sv);
 						++g_stats.punishes;
+						r.punishAt = -1.0f;
 						Debug(std::format("{}: punish {}", Name(f), Name(e)));
+					} else if (!Driver::IsDriving(f)) {
+						Driver::Order order;
+						order.kind = Driver::Kind::kRunTo;
+						order.target = e->GetHandle();
+						order.speed = 550.0f;
+						order.stopDistance = reach * 0.85f;
+						order.duration = 1.2f;
+						Driver::Start(f, order);
 					}
 				}
 				if (!f->IsInCombat()) continue;

@@ -237,10 +237,26 @@ namespace Driver
 					break;
 				}
 			case Kind::kStepBack:
-				if (dist >= d.order.stopDistance) return "clear";
-				move = toDir * -1.0f;
-				face = Heading(toDir);
-				break;
+				{
+					auto swing = target->AsActorState()->GetAttackState();
+					bool attacking = swing == RE::ATTACK_STATE_ENUM::kDraw || swing == RE::ATTACK_STATE_ENUM::kSwing ||
+					                 swing == RE::ATTACK_STATE_ENUM::kHit;
+					if (d.order.holdWhileAttacked && !attacking && d.elapsed > 0.2f) return "swing over";
+					if (dist >= d.order.stopDistance) {
+						if (!d.order.holdWhileAttacked) return "clear";
+						// out of reach: wait there, facing the attacker, until its swing is over
+						a->SetRotationZ(TurnToward(a->GetAngleZ(), Heading(toDir), 8.0f * std::min(a_delta, 0.05f)));
+						if (auto slot = ClaimSlot(reinterpret_cast<std::uintptr_t>(a))) {
+							slot->speed.store(0.0f, std::memory_order_relaxed);
+							slot->direction.store(0.0f, std::memory_order_relaxed);
+							slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
+						}
+						return nullptr;
+					}
+					move = toDir * -1.0f;
+					face = Heading(toDir);
+					break;
+				}
 			default:  // run to
 				if (dist <= d.order.stopDistance) return "arrived";
 				move = toDir;
