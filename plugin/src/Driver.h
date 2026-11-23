@@ -12,7 +12,8 @@ namespace Driver
 	{
 		kCharge,    // run at the target, weaving side to side, facing it
 		kStepBack,  // back away from the target, facing it
-		kRunTo      // run toward the target (e.g. the player), facing the way it runs
+		kRunTo,     // run toward the target (e.g. the player), facing the way it runs
+		kFormation  // hold a spot next to the target (the player) while it moves: target-local spotX/spotY
 	};
 
 	struct Order
@@ -27,6 +28,9 @@ namespace Driver
 		float           weave = 1.0f;          // charge: sideways share (1 = 45 degrees); step back: 1 = diagonal
 		float           flipMin = 0.25f;       // charge: seconds between side changes
 		float           flipMax = 0.6f;
+		float           spotX = 0.0f;          // formation: right of the target
+		float           spotY = -130.0f;       // formation: ahead of the target (negative = behind)
+		float           sprintSpeed = 715.0f;  // formation: top speed while the target sprints
 	};
 
 	bool Install();  // animation channel and action hooks (kDataLoaded)

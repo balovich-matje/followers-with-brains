@@ -48,6 +48,8 @@ namespace Followers
 			int   offsetSlot = -1;
 			float offsetApplied = -100.0f;
 			float pathUntil = 0.0f;   // let the game's own (pathfinding) follow work until then
+			bool  pathNoted = false;
+			bool  formationDrive = false;
 			float speedBoost = 0.0f;
 			std::map<RE::ActorValue, float> avMods;  // temporary actor value changes we made
 			float recallUntil = 0.0f;                 // heading back to the player until then
@@ -1095,26 +1097,49 @@ namespace Followers
 				SetFleeing(f, s, false);
 			}
 
-			// the driver moves this follower right now: leave it alone
-			if (Driver::IsDriving(f)) return;
+			// the driver moves this follower right now (a charge, a dodge): leave it alone
+			if (Driver::IsDriving(f) && !s.formationDrive) return;
 
 			// ---- keep-offset follow
-			// The keep-offset steers in a straight line and faces the player's way, so it is only used
-			// close to the player with a clear line to the spot. Further away, or with a fence or rock
-			// in between, the game's own follow (pathfinding, running facing forward, traversal jumps)
-			// brings the follower back.
-			bool wantOffset = !busy && sameSpace && (recalling || (!inCombat && mode != 2));
-			if (wantOffset && !recalling) {
-				auto spot = SpotInWorld(player, OffsetSpot(mode, a_slot));
-				bool clear = dist < 450.0f && Driver::ClearLine(f, f->GetPosition(), spot);
-				if (!clear) s.pathUntil = g_time + 1.5f;
-				wantOffset = g_time >= s.pathUntil;
-			}
+			// Close/Medium: the movement driver holds the follower's spot next to the player (one smooth run
+			// at the player's pace, sprinting when the player sprints, facing the way the group moves).
+			// With a wall, fence or rock between her and the spot, the game's own follow (pathfinding,
+			// traversal jumps) takes over for a moment. Retreats still use the keep-offset.
+			bool wantOffset = !busy && sameSpace && recalling;
 			if (wantOffset) {
-				ApplyOffset(f, s, player, recalling ? 0 : mode, a_slot);
+				ApplyOffset(f, s, player, 0, a_slot);
 			} else {
 				ClearOffset(f, s);
 			}
+			bool formation = !busy && sameSpace && !inCombat && !recalling && mode != 2 && !waiting && dist < 1500.0f;
+			if (formation && !Driver::IsDriving(f) && g_time >= s.pathUntil) {
+				std::string_view lastEnd = Driver::LastEnd(f);
+				if (lastEnd == "blocked" || lastEnd == "edge" || lastEnd == "step" || lastEnd == "too far") {
+					if (!s.pathNoted) {
+						s.pathUntil = g_time + 2.0f;  // let the game's pathfinding get round it
+						s.pathNoted = true;
+					}
+				} else {
+					s.pathNoted = false;
+				}
+				auto  spotLocal = OffsetSpot(mode, a_slot);
+				auto  spot = SpotInWorld(player, spotLocal);
+				float gap = f->GetPosition().GetDistance(spot);
+				if (g_time >= s.pathUntil && (gap > 60.0f || player->IsMoving()) && Driver::ClearLine(f, f->GetPosition(), spot)) {
+					Driver::Order order;
+					order.kind = Driver::Kind::kFormation;
+					order.target = player->GetHandle();
+					order.spotX = spotLocal.x;
+					order.spotY = spotLocal.y;
+					order.speed = Tuning::Get().chargeSpeed;  // a run
+					order.sprintSpeed = 715.0f;               // a player's sprint (measured)
+					order.duration = 3600.0f;
+					if (Driver::Start(f, order)) s.pathNoted = false;
+				}
+			} else if (!formation && Driver::IsDriving(f) && s.formationDrive) {
+				Driver::Stop(f);
+			}
+			s.formationDrive = formation && Driver::IsDriving(f);
 
 			// ---- catch-up speed and teleport
 			bool travelling = (!inCombat || recalling) && !busy && sameSpace;

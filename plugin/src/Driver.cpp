@@ -188,6 +188,9 @@ namespace Driver
 			bool        hasLastTarget = false;
 			RE::NiPoint3 lastTargetPos;
 			float       speedNow = -1.0f;  // step back: this frame's speed (gap keeping)
+			bool        wantSprint = false;  // formation: sprint this frame
+			bool        sprintLogged = false;
+			bool        standing = false;    // formation: legs were stopped, restart them when moving again
 		};
 		std::unordered_map<RE::FormID, Drive>        g_drives;
 		std::unordered_map<RE::FormID, std::string>  g_lastEnd;
@@ -283,8 +286,8 @@ namespace Driver
 			RE::NiPoint3 to = target->GetPosition() - pos;
 			to.z = 0.0f;
 			float dist = to.Length();
-			if (dist < 1.0f) return "arrived";
-			RE::NiPoint3 toDir = to / dist;
+			if (dist < 1.0f && d.order.kind != Kind::kFormation) return "arrived";
+			RE::NiPoint3 toDir = dist > 0.001f ? to / dist : RE::NiPoint3{ 0.0f, 1.0f, 0.0f };
 
 			RE::NiPoint3 move;
 			float        face;
@@ -334,6 +337,43 @@ namespace Driver
 					face = Heading(toDir);
 					break;
 				}
+			case Kind::kFormation:
+				{
+					// where the spot is now, and how the target (player) moves
+					float        tz = target->GetAngleZ();
+					RE::NiPoint3 fwd{ std::sin(tz), std::cos(tz), 0.0f };
+					RE::NiPoint3 right{ std::cos(tz), -std::sin(tz), 0.0f };
+					RE::NiPoint3 spot = target->GetPosition() + right * d.order.spotX + fwd * d.order.spotY;
+					RE::NiPoint3 targetPos = target->GetPosition();
+					RE::NiPoint3 tv{};
+					if (d.hasLastTarget && a_delta > 0.0f) tv = (targetPos - d.lastTargetPos) / a_delta;
+					tv.z = 0.0f;
+					d.lastTargetPos = targetPos;
+					d.hasLastTarget = true;
+					float tSpeed = tv.Length();
+					RE::NiPoint3 toSpot = spot - pos;
+					toSpot.z = 0.0f;
+					float gap = toSpot.Length();
+					if (gap < 25.0f && tSpeed < 30.0f) return "in place";
+					if (gap > 1500.0f) return "too far";
+					bool  sprinting = target->AsActorState()->IsSprinting();
+					float top = sprinting ? d.order.sprintSpeed : d.order.speed;
+					// the target's own speed plus a pull toward the spot: one smooth run, no stops
+					float want = std::min(top * 1.1f, tSpeed + gap * 3.0f);
+					if (gap < 25.0f) want = tSpeed;
+					d.speedNow = want;
+					if (gap > 5.0f) {
+						move = toSpot / gap;
+					} else if (tSpeed > 1.0f) {
+						move = tv / tSpeed;
+					} else {
+						move = fwd;
+					}
+					// face the way the group moves; when catching up from far, the way she runs
+					face = tSpeed > 30.0f && gap < 200.0f ? Heading(tv) : Heading(move);
+					d.wantSprint = sprinting && want > d.order.speed * 1.05f;
+					break;
+				}
 			default:  // run to
 				if (dist <= d.order.stopDistance) return "arrived";
 				move = toDir;
@@ -352,7 +392,7 @@ namespace Driver
 			RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f };
 			auto         ahead = Cast(a, world, pos + chest, pos + chest + move * (step + 40.0f));
 			if (ahead.hit && ahead.ref != a) {
-				if (ahead.ref == target) return "arrived";
+				if (ahead.ref == target && d.order.kind != Kind::kFormation) return "arrived";
 				// people (the player, other followers) step aside or get pushed; only walls and rocks stop a drive
 				if (!ahead.ref || !ahead.ref->Is(RE::FormType::ActorCharacter)) return "blocked";
 			}
@@ -380,20 +420,38 @@ namespace Driver
 				slot->direction.store(turns, std::memory_order_relaxed);
 				slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			}
+			// formation stands still and moves again many times: restart the legs when it sets off
+			if (d.order.kind == Kind::kFormation) {
+				if (speed < 20.0f) {
+					d.standing = true;
+				} else if (d.standing && speed > 60.0f) {
+					d.standing = false;
+					d.moveSent = false;
+				}
+			}
 			if (!d.moveSent) {
 				bool took = Send(a, "moveStart"sv);
 				d.moveSent = true;
-				if (!took) logger::info("{}: moveStart refused by the graph", a->GetDisplayFullName());
+				if (!took && d.order.kind != Kind::kFormation) logger::info("{}: moveStart refused by the graph", a->GetDisplayFullName());
 			}
-			if (d.order.sprint && !d.sprinting) {
+			if (d.order.kind == Kind::kFormation && d.sprinting && !d.wantSprint) {
+				state->actorState1.sprinting = 0;
+				a->SetGraphVariableBool("IsSprinting", false);
+				Send(a, "SprintStop"sv);
+				d.sprinting = false;
+			}
+			if ((d.order.sprint || (d.order.kind == Kind::kFormation && d.wantSprint)) && !d.sprinting) {
 				state->actorState1.sprinting = 1;
 				bool flag = a->SetGraphVariableBool("IsSprinting", true);
 				bool took = Send(a, "SprintStart"sv);
 				bool readBack = false;
 				a->GetGraphVariableBool("IsSprinting", readBack);
 				d.sprinting = true;
-				logger::info("{}: sprint: IsSprinting variable {}, read back {}, SprintStart event {}", a->GetDisplayFullName(),
-					flag ? "set" : "not in this graph", readBack, took ? "taken" : "refused");
+				if (!d.sprintLogged) {
+					logger::info("{}: sprint: IsSprinting variable {}, read back {}, SprintStart event {}", a->GetDisplayFullName(),
+						flag ? "set" : "not in this graph", readBack, took ? "taken" : "refused");
+					d.sprintLogged = true;
+				}
 			} else if (d.sprinting) {
 				// the game clears the sprint state on its own: keep it, and restart the sprint if the graph left it
 				state->actorState1.sprinting = 1;
