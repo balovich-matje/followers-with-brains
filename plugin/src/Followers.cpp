@@ -50,6 +50,11 @@ namespace Followers
 			float pathUntil = 0.0f;   // let the game's own (pathfinding) follow work until then
 			bool  pathNoted = false;
 			int   blockedCount = 0;
+			float nextHop = 0.0f;
+			int   hopFails = 0;
+			float stallSince = -1.0f;
+			RE::NiPoint3 followSample;
+			float followSampleTime = -100.0f;
 			float driveStarted = -100.0f;
 			bool  formationDrive = false;
 			float speedBoost = 0.0f;
@@ -392,6 +397,73 @@ namespace Followers
 			default:  // behind
 				return { a_slot == 0 ? 0.0f : sign * t.side * n, -(t.back + 50.0f * n) };
 			}
+		}
+
+		// A follower stuck below a rock the player is on, above a drop the player went down, or at a fence:
+		// hop there. Returns true when a hop started.
+		bool TryHop(RE::Actor* f, FollowerState& s, RE::PlayerCharacter* a_player)
+		{
+			if (g_time < s.nextHop || Driver::IsDriving(f) || s.hopFails >= 4) return false;
+			RE::NiPoint3 up{ 0.0f, 0.0f, 1.0f };
+			auto         fp = f->GetPosition();
+			auto         pp = a_player->GetPosition();
+			RE::NiPoint3 flat = pp - fp;
+			flat.z = 0.0f;
+			float d = flat.Length();
+			if (d < 1.0f) return false;
+			RE::NiPoint3 dir = flat / d;
+			float        dz = pp.z - fp.z;
+			RE::NiPoint3 landing;
+			const char*  what = nullptr;
+			s.nextHop = g_time + 2.0f;
+
+			if (dz > 60.0f && dz < 260.0f && d < 600.0f) {
+				// up onto the player's level, a step short of the player
+				landing = pp - dir * std::min(110.0f, d * 0.5f);
+				if (!Driver::GroundAt(f, landing, 120.0f) || std::fabs(landing.z - pp.z) > 60.0f) {
+					++s.hopFails;
+					return false;
+				}
+				if (!Driver::ClearLine(f, fp + up * (dz + 30.0f), landing + up * 10.0f)) {
+					++s.hopFails;
+					return false;
+				}
+				what = "up";
+			} else if (dz < -80.0f && dz > -700.0f && d < 800.0f) {
+				// down toward the player
+				landing = fp + dir * std::min(260.0f, d * 0.6f);
+				landing.z = pp.z;
+				if (!Driver::GroundAt(f, landing, 250.0f) || landing.z > fp.z - 40.0f) {
+					++s.hopFails;
+					return false;
+				}
+				what = "down";
+			} else if (std::fabs(dz) < 80.0f) {
+				// over a fence or low wall: blocked at the knee, clear at head height, ground beyond
+				bool knee = Driver::ClearLine(f, fp - up * 25.0f, fp - up * 25.0f + dir * 120.0f);
+				bool head = Driver::ClearLine(f, fp + up * 80.0f, fp + up * 80.0f + dir * 180.0f);
+				if (knee || !head) {
+					++s.hopFails;
+					return false;
+				}
+				landing = fp + dir * 180.0f;
+				if (!Driver::GroundAt(f, landing, 150.0f) || std::fabs(landing.z - fp.z) > 120.0f) {
+					++s.hopFails;
+					return false;
+				}
+				what = "over";
+			} else {
+				return false;
+			}
+			Driver::Order order;
+			order.kind = Driver::Kind::kHop;
+			order.target = a_player->GetHandle();
+			order.landing = landing;
+			if (!Driver::Start(f, order)) return false;
+			s.hopFails = 0;
+			s.stallSince = -1.0f;
+			Debug(std::format("{} hops {}", Name(f), what));
+			return true;
 		}
 
 		// The area a follower keeps around the player (placement only applies to Close following).
@@ -1154,6 +1226,9 @@ namespace Followers
 			if (formation && !Driver::IsDriving(f) && g_time >= s.pathUntil) {
 				std::string_view lastEnd = Driver::LastEnd(f);
 				if (lastEnd == "blocked" || lastEnd == "edge" || lastEnd == "step" || lastEnd == "too far") {
+					if (!s.pathNoted && lastEnd == "blocked" && TryHop(f, s, player)) {
+						s.pathNoted = true;
+					}
 					if (!s.pathNoted) {
 						// let the game's pathfinding (and traversal mods) get round it, longer each time
 						s.blockedCount = std::min(s.blockedCount + 1, 4);
@@ -1179,6 +1254,23 @@ namespace Followers
 				}
 			} else if (!formation && Driver::IsDriving(f) && s.formationDrive) {
 				Driver::Stop(f);
+			}
+			// Stuck while following (not driven, the player away, barely moving): try a hop.
+			if (formation && !Driver::IsDriving(f) && dist > 250.0f) {
+				if (g_time - s.followSampleTime >= 0.5f) {
+					float moved = f->GetPosition().GetDistance(s.followSample);
+					s.followSample = f->GetPosition();
+					s.followSampleTime = g_time;
+					if (moved < 30.0f) {
+						if (s.stallSince < 0.0f) s.stallSince = g_time;
+					} else {
+						s.stallSince = -1.0f;
+						s.hopFails = 0;
+					}
+				}
+				if (s.stallSince >= 0.0f && g_time - s.stallSince >= 1.0f) TryHop(f, s, player);
+			} else if (!Driver::IsDriving(f)) {
+				s.stallSince = -1.0f;
 			}
 			if (s.formationDrive && Driver::IsDriving(f) && g_time - s.driveStarted > 3.0f) s.blockedCount = 0;
 			s.formationDrive = formation && Driver::IsDriving(f);

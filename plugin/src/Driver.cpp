@@ -194,6 +194,9 @@ namespace Driver
 			float       pickAngle = 0.0f;
 			float       pickRange = 200.0f;
 			float       lastSpeed = 0.0f;
+			bool        hopStarted = false;
+			bool        hopFalling = false;
+			RE::NiPoint3 hopFrom;
 			int         lastWeaponState = -1;
 			float       lastMoveKick = 0.0f;
 			bool        standing = false;    // formation: legs were stopped, restart them when moving again
@@ -301,6 +304,53 @@ namespace Driver
 				a_drive.sprintKicks ? std::format(", sprint restarted {}x", a_drive.sprintKicks) : std::string{});
 		}
 
+		// A jump along an arc from where the hop started to the landing point, with the graph's own
+		// jump, fall and landing animations. The body is placed every frame; no fall damage.
+		const char* Hop(RE::Actor* a, Drive& d, RE::bhkCharacterController* a_controller, float a_delta)
+		{
+			if (!d.hopStarted) {
+				d.hopStarted = true;
+				d.hopFrom = a->GetPosition();
+				RE::NiPoint3 flat = d.order.landing - d.hopFrom;
+				flat.z = 0.0f;
+				float run = flat.Length();
+				d.order.duration = std::clamp(run / 420.0f, 0.55f, 1.2f);
+				bool moving = a->IsMoving();
+				Send(a, moving ? "JumpDirectionalStart"sv : "JumpStandingStart"sv);
+				d.elapsed = 0.0f;
+				logger::info("{}: hop {:.0f} across, {:+.0f} up", a->GetDisplayFullName(), run, d.order.landing.z - d.hopFrom.z);
+			}
+			float dt = std::min(a_delta, 0.05f);
+			d.elapsed += dt;
+			float t = std::min(1.0f, d.elapsed / d.order.duration);
+			float rise = d.order.landing.z - d.hopFrom.z;
+			float apex = 45.0f + std::max(0.0f, rise) * 0.35f;
+			RE::NiPoint3 p = d.hopFrom + (d.order.landing - d.hopFrom) * t;
+			p.z = d.hopFrom.z + rise * t + apex * 4.0f * t * (1.0f - t);
+			RE::NiPoint3 dir = d.order.landing - d.hopFrom;
+			dir.z = 0.0f;
+			float len = dir.Length();
+			if (len > 1.0f) a->SetRotationZ(TurnToward(a->GetAngleZ(), Heading(dir / len), 10.0f * dt));
+			a->SetPosition(p, true);
+			float scale = RE::bhkWorld::GetWorldScale();
+			float horizontal = len / d.order.duration;
+			RE::NiPoint3 v = len > 1.0f ? dir / len * horizontal : RE::NiPoint3{};
+			float vz = (rise + apex * 4.0f * (1.0f - 2.0f * t)) / d.order.duration;
+			a_controller->context.currentState = t < 1.0f ? RE::hkpCharacterStateType::kInAir : RE::hkpCharacterStateType::kOnGround;
+			a_controller->SetLinearVelocityImpl(RE::hkVector4(v.x * scale, v.y * scale, vz * scale, 0.0f));
+			a_controller->fallStartHeight = p.z;
+			a_controller->fallTime = 0.0f;
+			if (t > 0.5f && !d.hopFalling) {
+				d.hopFalling = true;
+				Send(a, "JumpFall"sv);
+			}
+			if (t >= 1.0f) {
+				Send(a, horizontal > 150.0f ? "JumpLandDirectional"sv : "JumpLand"sv);
+				return "landed";
+			}
+			return nullptr;
+		}
+
 		// One frame of one drive. Returns why it ends, or nullptr to go on.
 		const char* Step(RE::Actor* a, Drive& d, float a_delta)
 		{
@@ -313,6 +363,8 @@ namespace Driver
 			auto cell = a->GetParentCell();
 			auto world = cell ? cell->GetbhkWorld() : nullptr;
 			if (!controller || !world) return "no physics";
+
+			if (d.order.kind == Kind::kHop) return Hop(a, d, controller, a_delta);
 
 			auto targetPtr = d.order.target.get();
 			auto target = targetPtr.get();
@@ -618,6 +670,17 @@ namespace Driver
 		RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f };
 		auto hit = Cast(a_actor, world, a_from + chest, a_to + chest);
 		return !hit.hit || hit.ref == a_actor || (hit.ref && hit.ref->Is(RE::FormType::ActorCharacter));
+	}
+
+	bool GroundAt(RE::Actor* a_actor, RE::NiPoint3& a_point, float a_range)
+	{
+		auto cell = a_actor ? a_actor->GetParentCell() : nullptr;
+		auto world = cell ? cell->GetbhkWorld() : nullptr;
+		if (!world) return false;
+		auto hit = Cast(a_actor, world, a_point + RE::NiPoint3{ 0.0f, 0.0f, a_range }, a_point - RE::NiPoint3{ 0.0f, 0.0f, a_range });
+		if (!hit.hit || (hit.ref && hit.ref->Is(RE::FormType::ActorCharacter))) return false;
+		a_point.z = hit.point.z;
+		return true;
 	}
 
 	float ZoneGap(const Order& a_order, RE::Actor* a_actor, RE::Actor* a_target, RE::NiPoint3* a_nearest)

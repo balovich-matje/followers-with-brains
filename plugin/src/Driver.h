@@ -13,7 +13,8 @@ namespace Driver
 		kCharge,    // run at the target, weaving side to side, facing it
 		kStepBack,  // back away from the target, facing it
 		kRunTo,     // run toward the target (e.g. the player), facing the way it runs
-		kFormation  // hold a spot next to the target (the player) while it moves: target-local spotX/spotY
+		kFormation,  // hold an area next to the target (the player) while it moves
+		kHop         // jump to the landing point (up a rock, down a ledge, over a fence)
 	};
 
 	struct Order
@@ -35,6 +36,7 @@ namespace Driver
 		float           zoneFar = 320.0f;
 		bool            zoneMirror = false;    // side placement: either side, whichever the follower is on
 		float           sprintSpeed = 715.0f;  // formation: top speed while the target sprints
+		RE::NiPoint3    landing;               // hop: where to land
 	};
 
 	bool Install();  // animation channel and action hooks (kDataLoaded)
@@ -51,6 +53,10 @@ namespace Driver
 
 	// Formation area helpers: where in a_target's frame a_actor stands, and the nearest point of the
 	// order's area (in world space). Returns the distance to the area (0 inside).
+	// A landing spot near a_point on solid ground: the ground height under it (within a_range up or
+	// down of a_point.z), or false when there is no ground there.
+	bool GroundAt(RE::Actor* a_actor, RE::NiPoint3& a_point, float a_range);
+
 	float ZoneGap(const Order& a_order, RE::Actor* a_actor, RE::Actor* a_target, RE::NiPoint3* a_nearest = nullptr);
 
 	// Why the last drive of this actor ended (for logs and tests).

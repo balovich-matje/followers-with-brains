@@ -14,6 +14,8 @@ Work in progress.
   of your line of sight).
 - The exact spot next to you is kept only when the follower is close with a clear line to it;
   otherwise the game's own pathfinding brings them back (round fences and rocks, facing forward).
+- A follower stuck below a rock you are on, above a drop you went down, or at a fence jumps:
+  up, down or over, with the game's own jump animations.
 - Followers that fall behind get a short speed boost. If they are still far away and out of
   sight, they are moved behind you.
 
