@@ -28,6 +28,8 @@ namespace Settings
 		float rangedRetreatDistance = 1200.0f;
 		bool  smartWeapons = true;   // switch between ranged and melee by distance and skill
 		bool  matchWeapons = true;   // out of combat, draw ranged when the player does
+		bool  reflexes = true;       // react to enemy attacks the moment they start
+		bool  zigzag = true;         // weave when closing in on archers and casters
 
 		// Misc
 		bool debug = false;

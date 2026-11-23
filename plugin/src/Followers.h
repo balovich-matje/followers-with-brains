@@ -12,6 +12,8 @@ namespace Followers
 		int   pref = 0;  // weapon kind the mod wants (1 melee, 2 ranged)
 		float dealt[2]{};
 		int   hits[2]{};
+		int   stepOuts = 0, blocks = 0, bashes = 0, taken = 0, punishes = 0, zigzags = 0;
+		float damageTaken = 0.0f;
 	};
 	DebugInfo GetDebugInfo(RE::Actor* a_actor);
 

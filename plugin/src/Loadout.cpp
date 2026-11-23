@@ -43,15 +43,9 @@ namespace Loadout
 			return a_weapon->IsTwoHandedSword() || a_weapon->IsTwoHandedAxe();
 		}
 
-		// Damage of one hit as the game works it out (skill, perks, buffs, tempering).
 		float HitDamage(RE::Actor* a_actor, RE::InventoryEntryData* a_entry)
 		{
-			auto target = RE::PlayerCharacter::GetSingleton();
-			if (!a_entry || !target || target == a_actor) return 0.0f;
-			alignas(16) std::array<std::byte, sizeof(RE::HitData)> buffer{};
-			auto hit = reinterpret_cast<RE::HitData*>(buffer.data());
-			hit->Populate(a_actor, target, a_entry);
-			return std::max(0.0f, hit->totalDamage);
+			return Loadout::HitDamage(a_actor, RE::PlayerCharacter::GetSingleton(), a_entry);
 		}
 
 		float EnchantDamage(RE::InventoryEntryData* a_entry, RE::TESObjectWEAP* a_weapon)
@@ -76,6 +70,15 @@ namespace Loadout
 			float perSecond = (a_weapon->IsBow() || a_weapon->IsCrossbow()) ? speed / 2.0f : speed * 0.8f;
 			return hit * perSecond;
 		}
+	}
+
+	float HitDamage(RE::Actor* a_attacker, RE::Actor* a_target, RE::InventoryEntryData* a_entry)
+	{
+		if (!a_entry || !a_target || a_target == a_attacker) return 0.0f;
+		alignas(16) std::array<std::byte, sizeof(RE::HitData)> buffer{};
+		auto hit = reinterpret_cast<RE::HitData*>(buffer.data());
+		hit->Populate(a_attacker, a_target, a_entry);
+		return std::max(0.0f, hit->totalDamage);
 	}
 
 	Options Read(RE::Actor* a_actor)

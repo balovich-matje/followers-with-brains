@@ -12,7 +12,7 @@ String[] _toggleInfo
 Int[] _toggleOIDs
 
 Int Function GetVersion()
-	Return 2
+	Return 3
 EndFunction
 
 Event OnVersionUpdate(Int a_version)
@@ -32,10 +32,10 @@ Event OnConfigInit()
 	_distanceNames[1] = "Medium"
 	_distanceNames[2] = "Far"
 
-	_toggleKeys = new String[11]
-	_toggleNames = new String[11]
-	_toggleInfo = new String[11]
-	_toggleOIDs = new Int[11]
+	_toggleKeys = new String[13]
+	_toggleNames = new String[13]
+	_toggleInfo = new String[13]
+	_toggleOIDs = new Int[13]
 	SetToggle(0, "CatchUp", "Catch-up speed boost", "Followers who fall behind move faster until they catch up.")
 	SetToggle(1, "Teleport", "Teleport when far behind", "A follower who is still far behind after a few seconds, and out of your sight, is moved behind you.")
 	SetToggle(2, "CombatLeash", "Stay close in combat", "Followers stop chasing enemies that are far away from you.")
@@ -46,6 +46,8 @@ Event OnConfigInit()
 	SetToggle(7, "Retreat", "Retreat with you", "When you back away from a fight, followers come with you. Ranged followers keep shooting while they are close to you. Healing your party does not count as retreating.")
 	SetToggle(8, "Debug", "Debug messages", "Show what followers decide, as notifications.")
 	SetToggle(9, "SmartWeapons", "Ranged or melee by distance", "Followers who carry both pick by skill and distance: they shoot while enemies are far and switch to melee as enemies arrive (or the other way round for archers and mages).")
+	SetToggle(11, "Reflexes", "Reflexes", "The moment an enemy starts an attack on them, followers weigh it: take a light hit, block it, bash a power attack, or step out of reach and hit back. They also strike at once when an enemy staggers.")
+	SetToggle(12, "Zigzag", "Zig-zag toward archers", "Melee followers weave from side to side while closing in on archers and casters.")
 	SetToggle(10, "MatchWeapons", "Match your weapon", "Out of combat, when you draw a bow or an attack spell your followers draw their ranged weapon, and switch back when you draw a melee weapon.")
 EndEvent
 
@@ -72,7 +74,7 @@ EndFunction
 
 Event OnPageReset(String a_page)
 	; a save made with an older version still has the old, shorter option lists
-	If !_toggleKeys || _toggleKeys.Length < 11 || !_toggleKeys[10]
+	If !_toggleKeys || _toggleKeys.Length < 13 || !_toggleKeys[12]
 		OnConfigInit()
 	EndIf
 	SetCursorFillMode(TOP_TO_BOTTOM)
@@ -91,6 +93,9 @@ Event OnPageReset(String a_page)
 		AddToggle(4)
 		AddToggle(5)
 		AddToggle(6)
+		AddHeaderOption("Reflexes")
+		AddToggle(11)
+		AddToggle(12)
 		AddHeaderOption("Weapons")
 		AddToggle(9)
 		AddToggle(10)

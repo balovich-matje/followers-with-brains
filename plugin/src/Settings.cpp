@@ -39,6 +39,8 @@ namespace Settings
 			{ "Retreat"sv, &Values::retreat },
 			{ "SmartWeapons"sv, &Values::smartWeapons },
 			{ "MatchWeapons"sv, &Values::matchWeapons },
+			{ "Reflexes"sv, &Values::reflexes },
+			{ "Zigzag"sv, &Values::zigzag },
 			{ "Debug"sv, &Values::debug },
 		};
 		constexpr FloatField kFloats[] = {

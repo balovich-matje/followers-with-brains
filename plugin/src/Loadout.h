@@ -25,6 +25,9 @@ namespace Loadout
 	};
 
 	Options Read(RE::Actor* a_actor);
+
+	// Damage of one hit as the game works it out (skill, perks, buffs, tempering, target's armor).
+	float HitDamage(RE::Actor* a_attacker, RE::Actor* a_target, RE::InventoryEntryData* a_entry);
 	bool    HoldsRanged(RE::Actor* a_actor);
 	bool    IsDrawingBow(RE::Actor* a_actor);
 

@@ -647,6 +647,200 @@ namespace Followers
 		}
 
 		// ------------------------------------------------------------------ per-follower logic
+		// ------------------------------------------------------------------ reflexes (every frame)
+		struct ReflexState
+		{
+			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash
+			float until = 0.0f;
+			float cooldownUntil = 0.0f;
+			float punishAt = -1.0f;
+			RE::ActorHandle against;
+			float bashTime = -100.0f;
+			bool  offset = false;
+		};
+
+		std::unordered_map<RE::FormID, ReflexState>                  g_reflex;
+		std::unordered_map<RE::FormID, RE::ATTACK_STATE_ENUM>         g_enemyAttack;  // last seen attack state
+		std::unordered_map<RE::FormID, bool>                          g_enemyStagger;
+		std::unordered_map<RE::FormID, int>                           g_bashFails;    // enemies that shrug off bashes
+		std::vector<RE::ActorHandle> g_lastFollowers;
+		std::vector<RE::ActorHandle> g_lastEnemies;
+
+		struct ReflexStats
+		{
+			int stepOuts = 0, blocks = 0, bashes = 0, taken = 0, punishes = 0, zigzags = 0;
+			float damageTaken = 0.0f;
+		} g_stats;
+
+		bool HasShield(RE::Actor* a)
+		{
+			auto left = a->GetEquippedObject(true);
+			return left && left->IsArmor();
+		}
+
+		bool IsStaggered(RE::Actor* a)
+		{
+			bool value = false;
+			return a->GetGraphVariableBool("IsStaggering", value) && value;
+		}
+
+		void EndReflex(RE::Actor* f, ReflexState& r)
+		{
+			if (r.action == 2 || r.action == 3) f->NotifyAnimationGraph("blockStop"sv);
+			if (r.offset) {
+				Papyrus::ClearOffset(f);
+				r.offset = false;
+				auto& s = g_state[f->GetFormID()];
+				s.offsetMode = -1;
+				s.offsetSlot = -1;
+			}
+			r.action = 0;
+		}
+
+		void ReactToAttack(RE::Actor* f, RE::Actor* e, ReflexState& r)
+		{
+			auto process = e->GetActorRuntimeData().currentProcess;
+			auto data = process && process->high ? process->high->attackData.get() : nullptr;
+			bool  power = data && data->data.flags.any(RE::AttackData::AttackFlag::kPowerAttack);
+			float mult = data ? std::max(1.0f, data->data.damageMult) : 1.0f;
+			float hit = Loadout::HitDamage(e, f, e->GetEquippedEntryData(false)) * mult;
+			float health = f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+			float share = health > 0.0f ? hit / health : 1.0f;
+			bool  bashable = g_bashFails[e->GetFormID()] < 2 && f->GetEquippedObject(false) && Dist(f, e) < 200.0f;
+
+			const char* what = nullptr;
+			if (power && bashable && Loadout::Read(f).HasMelee()) {
+				f->NotifyAnimationGraph("blockStart"sv);
+				f->NotifyAnimationGraph("bashStart"sv);
+				r.action = 3;
+				r.until = g_time + 0.5f;
+				r.bashTime = g_time;
+				++g_stats.bashes;
+				what = "bash";
+			} else if (power || share > 0.2f) {
+				if (!power && HasShield(f)) {
+					f->NotifyAnimationGraph("blockStart"sv);
+					r.action = 2;
+					r.until = g_time + 0.7f;
+					++g_stats.blocks;
+					what = "block";
+				} else {
+					// step back out of reach (offset is in front of the enemy, away from it)
+					float reach = 250.0f;
+					if (auto weap = e->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
+						reach = std::max(150.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
+					}
+					Papyrus::KeepOffset(f, e, 0.0f, reach + 150.0f, 30.0f, 10.0f);
+					r.offset = true;
+					r.action = 1;
+					r.until = g_time + (power ? 0.9f : 0.6f);
+					r.punishAt = r.until + 0.05f;
+					++g_stats.stepOuts;
+					what = "step out";
+				}
+			} else {
+				++g_stats.taken;
+				return;
+			}
+			r.against = e->GetHandle();
+			r.cooldownUntil = g_time + 1.0f;
+			Debug(std::format("{}: {} vs {} ({}{:.0f} dmg, {:.0f}% hp)", Name(f), what, Name(e), power ? "power, " : "", hit, share * 100.0f));
+		}
+
+		void UpdateReflexes()
+		{
+			if (!Settings::Get().reflexes) return;
+			for (auto& fh : g_lastFollowers) {
+				auto f = Get(fh);
+				if (!f || !Alive(f)) continue;
+				auto& r = g_reflex[f->GetFormID()];
+
+				if (r.action != 0 && g_time >= r.until) {
+					// a bash that did not stagger counts against that enemy
+					if (r.action == 3) {
+						auto e = Get(r.against);
+						if (e && !IsStaggered(e)) ++g_bashFails[e->GetFormID()];
+					}
+					EndReflex(f, r);
+				}
+				if (r.punishAt >= 0.0f && g_time >= r.punishAt) {
+					r.punishAt = -1.0f;
+					auto e = Get(r.against);
+					if (Alive(e) && Dist(f, e) < 400.0f && !IsRanged(f)) {
+						f->NotifyAnimationGraph("attackStart"sv);
+						++g_stats.punishes;
+						Debug(std::format("{}: punish {}", Name(f), Name(e)));
+					}
+				}
+				if (!f->IsInCombat()) continue;
+
+				for (auto& eh : g_lastEnemies) {
+					auto e = Get(eh);
+					if (!Alive(e)) continue;
+					auto id = e->GetFormID();
+					auto state = e->AsActorState()->GetAttackState();
+					auto prev = g_enemyAttack.contains(id) ? g_enemyAttack[id] : RE::ATTACK_STATE_ENUM::kNone;
+					g_enemyAttack[id] = state;
+					bool staggered = IsStaggered(e);
+					bool wasStaggered = g_enemyStagger[id];
+					g_enemyStagger[id] = staggered;
+					float d = Dist(f, e);
+					if (d > 450.0f) continue;
+
+					// opening: the enemy was just staggered next to us -> hit it now
+					if (staggered && !wasStaggered && d < 300.0f && r.action == 0 && !IsRanged(f) &&
+						f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone) {
+						f->NotifyAnimationGraph("attackStart"sv);
+						++g_stats.punishes;
+						Debug(std::format("{}: punish staggered {}", Name(f), Name(e)));
+						continue;
+					}
+
+					bool starting = prev == RE::ATTACK_STATE_ENUM::kNone &&
+					                (state == RE::ATTACK_STATE_ENUM::kDraw || state == RE::ATTACK_STATE_ENUM::kSwing);
+					if (starting && CombatTarget(e) == f && r.action == 0 && g_time >= r.cooldownUntil) {
+						ReactToAttack(f, e, r);
+					}
+				}
+			}
+		}
+
+		// ------------------------------------------------------------------ zig-zag toward shooters
+		struct ZigState
+		{
+			float nextFlip = 0.0f;
+			int   side = 1;
+			bool  active = false;
+		};
+		std::unordered_map<RE::FormID, ZigState> g_zig;
+
+		bool UpdateZigzag(RE::Actor* f, FollowerState& s, RE::Actor* a_target)
+		{
+			auto& z = g_zig[f->GetFormID()];
+			auto& r = g_reflex[f->GetFormID()];
+			bool  want = Settings::Get().zigzag && a_target && !IsRanged(f) && IsRanged(a_target) && r.action == 0;
+			float d = want ? Dist(f, a_target) : 0.0f;
+			want = want && d > 450.0f && d < 3000.0f;
+			if (!want) {
+				if (z.active) {
+					Papyrus::ClearOffset(f);
+					s.offsetMode = -1;
+					s.offsetSlot = -1;
+					z.active = false;
+				}
+				return false;
+			}
+			if (!z.active || g_time >= z.nextFlip) {
+				z.side = -z.side;
+				z.nextFlip = g_time + 0.8f + static_cast<float>(std::rand() % 40) / 100.0f;
+				float ahead = std::max(250.0f, d - 450.0f);  // in front of the shooter, toward us
+				Papyrus::KeepOffset(f, a_target, static_cast<float>(z.side) * 260.0f, ahead, 40.0f, 20.0f);
+				if (!z.active) ++g_stats.zigzags;
+				z.active = true;
+			}
+			return true;
+		}
+
 		// Damage per second: measured in this session once there is enough data, otherwise estimated.
 		float Dps(const FollowerState& s, int a_kind, float a_estimate)
 		{
@@ -830,6 +1024,7 @@ namespace Followers
 
 			// ---- ranged or melee
 			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
+			UpdateZigzag(f, s, target);
 
 			// ---- summons: go for the summoner when it can be reached
 			if (cfg.focusSummoners && target->IsCommandedActor() && g_time - s.lastRetarget > 1.0f) {
@@ -885,6 +1080,10 @@ namespace Followers
 		void RunLogic(RE::PlayerCharacter* a_player)
 		{
 			auto scan = DoScan(a_player);
+			g_lastFollowers.clear();
+			g_lastEnemies.clear();
+			for (auto f : scan.followers) g_lastFollowers.push_back(f->GetHandle());
+			for (auto e : scan.enemies) g_lastEnemies.push_back(e->GetHandle());
 
 			std::vector<QueuedEvent> events;
 			{
@@ -993,6 +1192,10 @@ namespace Followers
 			static void thunk(RE::Actor* a_victim, RE::Actor* a_attacker, float a_damage)
 			{
 				func(a_victim, a_attacker, a_damage);
+				if (a_attacker && a_victim && !a_victim->IsPlayerRef() && a_victim->IsPlayerTeammate() && !a_attacker->IsPlayerTeammate()) {
+					std::scoped_lock lock{ g_lock };
+					g_stats.damageTaken += std::abs(a_damage);
+				}
 				if (a_attacker && a_attacker != a_victim && !a_attacker->IsPlayerRef() && a_attacker->IsPlayerTeammate()) {
 					std::scoped_lock lock{ g_lock };
 					g_damage.push_back({ a_attacker->GetFormID(), std::abs(a_damage) });
@@ -1100,6 +1303,11 @@ namespace Followers
 		g_retreating = false;
 		g_marked = {};
 		g_watchTarget = {};
+		g_reflex.clear();
+		g_enemyAttack.clear();
+		g_enemyStagger.clear();
+		g_zig.clear();
+		g_stats = {};
 		{
 			std::scoped_lock lock{ g_prefLock };
 			g_weaponPref.clear();
@@ -1119,6 +1327,7 @@ namespace Followers
 	{
 		g_time += a_delta;
 		g_logicTimer += a_delta;
+		UpdateReflexes();
 		if (g_logicTimer < kLogicInterval) return;
 		g_logicTimer = 0.0f;
 
@@ -1136,6 +1345,13 @@ namespace Followers
 			auto it = g_weaponPref.find(a_actor->GetFormID());
 			if (it != g_weaponPref.end()) info.pref = it->second;
 		}
+		info.stepOuts = g_stats.stepOuts;
+		info.blocks = g_stats.blocks;
+		info.bashes = g_stats.bashes;
+		info.taken = g_stats.taken;
+		info.punishes = g_stats.punishes;
+		info.zigzags = g_stats.zigzags;
+		info.damageTaken = g_stats.damageTaken;
 		auto it = g_state.find(a_actor->GetFormID());
 		if (it != g_state.end()) {
 			for (int i = 0; i < 2; ++i) {
