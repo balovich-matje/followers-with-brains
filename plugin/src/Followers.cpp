@@ -52,6 +52,10 @@ namespace Followers
 			int   overrides = 0;              // times the combat AI undid our weapon choice
 			float respectAIUntil = 0.0f;
 			float unreachableUntil = 0.0f;    // melee could not reach its target recently
+			// measured damage while holding each kind of weapon (0 melee, 1 ranged)
+			float dealt[2]{};
+			float heldTime[2]{};
+			int   hits[2]{};
 			float prevTargetDist = -1.0f;
 			float targetDistTime = -100.0f;
 			bool  closing = false;
@@ -108,6 +112,13 @@ namespace Followers
 		std::vector<QueuedEvent>                   g_queue;
 		std::unordered_map<RE::FormID, FollowerState> g_state;
 		std::vector<std::tuple<RE::FormID, RE::ActorValue, float>> g_pendingUndo;
+
+		struct DamageRecord
+		{
+			RE::FormID attacker;
+			float      amount;
+		};
+		std::vector<DamageRecord> g_damage;  // filled by the health damage hook, read in RunLogic
 		int g_lastPlayerRanged = -1;
 
 		float g_time = 0.0f;
@@ -298,6 +309,9 @@ namespace Followers
 				s.lastSwap = g_time;
 				s.swappedToRanged = a_ranged;
 				Debug(std::format("{} switches to {} ({})", Name(a), a_ranged ? "ranged" : "melee", a_why));
+				logger::info("  dps melee {:.1f} ({} hits/{:.0f}s), ranged {:.1f} ({} hits/{:.0f}s)",
+					s.heldTime[0] > 0 ? s.dealt[0] / s.heldTime[0] : 0.0f, s.hits[0], s.heldTime[0],
+					s.heldTime[1] > 0 ? s.dealt[1] / s.heldTime[1] : 0.0f, s.hits[1], s.heldTime[1]);
 			}
 		}
 
@@ -599,9 +613,21 @@ namespace Followers
 		}
 
 		// ------------------------------------------------------------------ per-follower logic
+		// Damage per second: measured in this session once there is enough data, otherwise estimated.
+		float Dps(const FollowerState& s, int a_kind, float a_estimate)
+		{
+			if (s.hits[a_kind] >= 5 && s.heldTime[a_kind] >= 10.0f) {
+				float measured = s.dealt[a_kind] / s.heldTime[a_kind];
+				return a_estimate > 0.0f ? measured * 0.75f + a_estimate * 0.25f : measured;
+			}
+			return a_estimate;
+		}
+
 		void UpdateWeapons(RE::Actor* f, FollowerState& s, RE::Actor* a_target, bool a_retreating)
 		{
-			auto& options = GetLoadout(f, s);
+			auto  options = GetLoadout(f, s);
+			options.meleeScore = Dps(s, 0, options.meleeScore);
+			options.rangedScore = Dps(s, 1, options.rangedScore);
 			if (!options.HasRanged() || !options.HasMelee() || !a_target) return;
 
 			float d = Dist(f, a_target);
@@ -824,6 +850,23 @@ namespace Followers
 			}
 			for (auto& e : events) HandleEvent(e, scan);
 
+			std::vector<DamageRecord> damage;
+			{
+				std::scoped_lock lock{ g_lock };
+				damage.swap(g_damage);
+			}
+			for (auto& d : damage) {
+				auto it = g_state.find(d.attacker);
+				auto actor = RE::TESForm::LookupByID<RE::Actor>(d.attacker);
+				if (it == g_state.end() || !actor) continue;
+				int kind = IsRanged(actor) ? 1 : 0;
+				it->second.dealt[kind] += d.amount;
+				it->second.hits[kind] += 1;
+			}
+			for (auto f : scan.followers) {
+				if (f->IsInCombat()) g_state[f->GetFormID()].heldTime[IsRanged(f) ? 1 : 0] += kLogicInterval;
+			}
+
 			for (auto it = g_pendingPlayerHits.begin(); it != g_pendingPlayerHits.end();) {
 				if (g_time >= it->time) {
 					auto target = Get(it->target);
@@ -865,6 +908,19 @@ namespace Followers
 			{
 				func(a_player, a_delta);
 				Tick(a_delta);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct HealthDamage
+		{
+			static void thunk(RE::Actor* a_victim, RE::Actor* a_attacker, float a_damage)
+			{
+				func(a_victim, a_attacker, a_damage);
+				if (a_attacker && a_attacker != a_victim && !a_attacker->IsPlayerRef() && a_attacker->IsPlayerTeammate()) {
+					std::scoped_lock lock{ g_lock };
+					g_damage.push_back({ a_attacker->GetFormID(), std::abs(a_damage) });
+				}
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -939,6 +995,8 @@ namespace Followers
 	{
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_PlayerCharacter[0] };
 		PlayerUpdate::func = vtbl.write_vfunc(0xAD, PlayerUpdate::thunk);
+		REL::Relocation<std::uintptr_t> characterVtbl{ RE::VTABLE_Character[0] };
+		HealthDamage::func = characterVtbl.write_vfunc(0x104, HealthDamage::thunk);
 
 		auto holder = RE::ScriptEventSourceHolder::GetSingleton();
 		holder->AddEventSink<RE::TESHitEvent>(Sink::Get());

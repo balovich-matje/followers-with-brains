@@ -12,7 +12,7 @@ namespace Loadout
 		RE::SpellItem*     spell = nullptr;     // best aimed attack spell known
 		float              meleeSkill = 0.0f;
 		float              rangedSkill = 0.0f;
-		float              meleeScore = 0.0f;   // weapon damage scaled by skill
+		float              meleeScore = 0.0f;   // estimated damage per second
 		float              rangedScore = 0.0f;
 
 		[[nodiscard]] bool HasRanged() const { return bow || spell; }
