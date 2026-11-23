@@ -1,0 +1,14 @@
+cmake_minimum_required(VERSION 3.24)
+project(FollowersWithBrains VERSION 0.1.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(CommonLibSSE CONFIG REQUIRED)
+
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)
+add_library(${PROJECT_NAME} SHARED ${SOURCES})
+target_include_directories(${PROJECT_NAME} PRIVATE src)
+target_link_libraries(${PROJECT_NAME} PRIVATE CommonLibSSE::CommonLibSSE)
+target_compile_definitions(${PROJECT_NAME} PRIVATE PLUGIN_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+	PLUGIN_VERSION_MINOR=${PROJECT_VERSION_MINOR} PLUGIN_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)

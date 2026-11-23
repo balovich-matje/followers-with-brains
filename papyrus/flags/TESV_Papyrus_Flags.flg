@@ -1,0 +1,13 @@
+/* Script flags for Skyrim */
+Flag hidden 0
+{
+	Script
+	Property
+	Variable
+}
+Flag conditional 1
+{
+	Script
+	Property
+	Variable
+}
