@@ -27,6 +27,15 @@ Work in progress.
 - Backing off to heal does not count as a retreat. A follower you just healed may fight one
   distance step further from you for a few seconds.
 
+**Fighting style**
+- Each follower fights with a private, tuned copy of their combat style, so the game's own combat
+  AI does the moves with its normal in-combat movement: dodging whatever can be dodged, strafing
+  instead of running straight at archers, circling and stepping back in melee, hitting staggered
+  enemies and bashing power attacks (when they can block). No stats, skills or perks change, and
+  the original style comes back when they leave.
+- On top of that, the moment an enemy starts an attack on them, they weigh how hard it will hit
+  and step out of reach of the big ones, then strike back.
+
 **Weapons**
 - Followers who carry both ranged and melee weapons compare their damage per second, first as the
   game calculates a hit (perks, buffs, tempering, enchantments, attack and draw speed), then from

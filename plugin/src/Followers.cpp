@@ -2,6 +2,7 @@
 #include "Loadout.h"
 #include "Papyrus.h"
 #include "Settings.h"
+#include "Tactics.h"
 #include "Test.h"
 
 namespace Followers
@@ -897,7 +898,8 @@ namespace Followers
 			auto& r = g_reflex[f->GetFormID()];
 
 			if (!z.active) {
-				if (!cfg.zigzag || !f->IsInCombat() || r.action != 0 || g_retreating) return false;
+				// Retired: strafing now comes from the tuned combat style (in combat, facing the enemy).
+				if (true || !cfg.zigzag || !f->IsInCombat() || r.action != 0 || g_retreating) return false;
 				auto target = CombatTarget(f);
 				if (!Alive(target) || !IsRanged(target)) return false;
 				float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
@@ -1001,6 +1003,7 @@ namespace Followers
 			auto& cfg = Settings::Get();
 			auto  player = a_scan.player;
 			auto& s = g_state[f->GetFormID()];
+			Tactics::Apply(f);
 			int   mode = std::clamp(cfg.followDistance, 0, 2);
 			int   combatMode = std::clamp(cfg.combatDistance + (g_time < s.healedUntil ? 1 : 0), 0, 2);
 			auto& tune = kTuning[mode];
@@ -1237,6 +1240,7 @@ namespace Followers
 					ClearOffset(form, kv.second);
 					SetBoost(form, kv.second, 0.0f);
 					SetFleeing(form, kv.second, false);
+					Tactics::Restore(form);
 					for (auto [av, amount] : kv.second.avMods) form->AsActorValueOwner()->ModActorValue(av, -amount);
 				}
 				return true;
