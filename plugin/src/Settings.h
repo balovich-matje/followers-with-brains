@@ -15,6 +15,7 @@ namespace Settings
 		// Movement
 		int  followDistance = 0;  // out of combat
 		int  combatDistance = 0;  // how far from the player followers fight
+		int  placement = 0;       // close following: 0 behind, 1 at the side, 2 ahead
 		bool catchUp = true;
 		bool teleport = true;
 		bool combatLeash = true;

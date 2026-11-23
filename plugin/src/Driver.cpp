@@ -483,6 +483,16 @@ namespace Driver
 		g_drivenIds.clear();
 	}
 
+	bool ClearLine(RE::Actor* a_actor, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to)
+	{
+		auto cell = a_actor ? a_actor->GetParentCell() : nullptr;
+		auto world = cell ? cell->GetbhkWorld() : nullptr;
+		if (!world) return true;
+		RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f };
+		auto hit = Cast(a_actor, world, a_from + chest, a_to + chest);
+		return !hit.hit || hit.ref == a_actor || (hit.ref && hit.ref->Is(RE::FormType::ActorCharacter));
+	}
+
 	bool IsDriving(RE::Actor* a_actor) { return a_actor && g_drives.contains(a_actor->GetFormID()); }
 
 	const char* LastEnd(RE::Actor* a_actor)

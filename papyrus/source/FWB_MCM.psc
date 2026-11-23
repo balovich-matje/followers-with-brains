@@ -4,6 +4,8 @@ Scriptname FWB_MCM extends SKI_ConfigBase
 String[] _distanceNames
 Int _distanceOID
 Int _combatDistanceOID
+Int _placementOID
+String[] _placementNames
 Int _retreatDistanceOID
 
 String[] _toggleKeys
@@ -12,7 +14,7 @@ String[] _toggleInfo
 Int[] _toggleOIDs
 
 Int Function GetVersion()
-	Return 3
+	Return 4
 EndFunction
 
 Event OnVersionUpdate(Int a_version)
@@ -31,6 +33,11 @@ Event OnConfigInit()
 	_distanceNames[0] = "Close"
 	_distanceNames[1] = "Medium"
 	_distanceNames[2] = "Far"
+
+	_placementNames = new String[3]
+	_placementNames[0] = "Behind you"
+	_placementNames[1] = "At your side"
+	_placementNames[2] = "Ahead of you"
 
 	_toggleKeys = new String[13]
 	_toggleNames = new String[13]
@@ -74,7 +81,7 @@ EndFunction
 
 Event OnPageReset(String a_page)
 	; a save made with an older version still has the old, shorter option lists
-	If !_toggleKeys || _toggleKeys.Length < 13 || !_toggleKeys[12]
+	If !_toggleKeys || _toggleKeys.Length < 13 || !_toggleKeys[12] || !_placementNames
 		OnConfigInit()
 	EndIf
 	SetCursorFillMode(TOP_TO_BOTTOM)
@@ -85,6 +92,7 @@ Event OnPageReset(String a_page)
 	EndWhile
 	_distanceOID = -1
 	_combatDistanceOID = -1
+	_placementOID = -1
 	_retreatDistanceOID = -1
 
 	If a_page == "Combat"
@@ -105,6 +113,11 @@ Event OnPageReset(String a_page)
 	Else
 		AddHeaderOption("Following")
 		_distanceOID = AddMenuOption("Follow distance", _distanceNames[FWB_Native.GetInt("FollowDistance")])
+		Int placementFlags = OPTION_FLAG_NONE
+		If FWB_Native.GetInt("FollowDistance") != 0
+			placementFlags = OPTION_FLAG_DISABLED
+		EndIf
+		_placementOID = AddMenuOption("Placement (Close)", _placementNames[FWB_Native.GetInt("Placement")], placementFlags)
 		_combatDistanceOID = AddMenuOption("Combat distance", _distanceNames[FWB_Native.GetInt("CombatDistance")])
 		AddToggle(0)
 		AddToggle(1)
@@ -129,6 +142,10 @@ Event OnOptionMenuOpen(Int a_option)
 		SetMenuDialogOptions(_distanceNames)
 		SetMenuDialogStartIndex(FWB_Native.GetInt("FollowDistance"))
 		SetMenuDialogDefaultIndex(0)
+	ElseIf a_option == _placementOID
+		SetMenuDialogOptions(_placementNames)
+		SetMenuDialogStartIndex(FWB_Native.GetInt("Placement"))
+		SetMenuDialogDefaultIndex(0)
 	ElseIf a_option == _combatDistanceOID
 		SetMenuDialogOptions(_distanceNames)
 		SetMenuDialogStartIndex(FWB_Native.GetInt("CombatDistance"))
@@ -141,6 +158,11 @@ Event OnOptionMenuAccept(Int a_option, Int a_index)
 		FWB_Native.SetInt("FollowDistance", a_index)
 		FWB_Native.Save()
 		SetMenuOptionValue(a_option, _distanceNames[a_index])
+		ForcePageReset()
+	ElseIf a_option == _placementOID && a_index >= 0
+		FWB_Native.SetInt("Placement", a_index)
+		FWB_Native.Save()
+		SetMenuOptionValue(a_option, _placementNames[a_index])
 	ElseIf a_option == _combatDistanceOID && a_index >= 0
 		FWB_Native.SetInt("CombatDistance", a_index)
 		FWB_Native.Save()
@@ -171,6 +193,8 @@ Event OnOptionHighlight(Int a_option)
 		SetInfoText(_toggleInfo[i])
 	ElseIf a_option == _distanceOID
 		SetInfoText("Out of combat. Close: followers stay right next to you and move the moment you do.\nMedium: a looser follow.\nFar: the game's own follow distance.")
+	ElseIf a_option == _placementOID
+		SetInfoText("Where followers stay with Close following: behind you, at your side, or ahead of you (off to the right, out of your line of sight).")
 	ElseIf a_option == _combatDistanceOID
 		SetInfoText("How far from you followers fight. Close: only enemies near you. Far: they range further. For 5 seconds after you heal a follower, they may go one step further.")
 	ElseIf a_option == _retreatDistanceOID

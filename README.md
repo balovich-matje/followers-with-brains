@@ -10,6 +10,10 @@ Work in progress.
   - *Close*: followers stay within interaction range and start moving the moment you do.
   - *Medium*: a looser follow.
   - *Far*: the game's own follow behaviour.
+- Placement for Close following: behind you, at your side, or ahead of you (off to the side, out
+  of your line of sight).
+- The exact spot next to you is kept only when the follower is close with a clear line to it;
+  otherwise the game's own pathfinding brings them back (round fences and rocks, facing forward).
 - Followers that fall behind get a short speed boost. If they are still far away and out of
   sight, they are moved behind you.
 

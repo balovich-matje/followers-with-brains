@@ -37,6 +37,10 @@ namespace Driver
 	void StopAll();
 	bool IsDriving(RE::Actor* a_actor);
 
+	// True when nothing solid (terrain, walls, rocks, fences) lies on the straight line between the
+	// two points, at chest height. People are ignored.
+	bool ClearLine(RE::Actor* a_actor, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to);
+
 	// Why the last drive of this actor ended (for logs and tests).
 	const char* LastEnd(RE::Actor* a_actor);
 }

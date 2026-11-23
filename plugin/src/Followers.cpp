@@ -46,6 +46,8 @@ namespace Followers
 		{
 			int   offsetMode = -1;  // keep-offset currently applied (-1 none)
 			int   offsetSlot = -1;
+			float offsetApplied = -100.0f;
+			float pathUntil = 0.0f;   // let the game's own (pathfinding) follow work until then
 			float speedBoost = 0.0f;
 			std::map<RE::ActorValue, float> avMods;  // temporary actor value changes we made
 			float recallUntil = 0.0f;                 // heading back to the player until then
@@ -369,16 +371,44 @@ namespace Followers
 			s.offsetSlot = -1;
 		}
 
+		// The spot (player-local x = right, y = forward) a follower keeps next to the player.
+		RE::NiPoint2 OffsetSpot(int a_mode, int a_slot)
+		{
+			auto& t = kTuning[a_mode];
+			float n = static_cast<float>((a_slot + 1) / 2);
+			float sign = a_slot % 2 ? 1.0f : -1.0f;
+			int   placement = a_mode == 0 ? std::clamp(Settings::Get().placement, 0, 2) : 0;
+			switch (placement) {
+			case 1:  // at the side, a step back
+				return { (a_slot == 0 ? 1.0f : -sign) * (140.0f + 60.0f * n), -30.0f - 40.0f * n };
+			case 2:  // ahead and to the right, out of the line of sight
+				return { (a_slot == 0 ? 1.0f : sign) * (110.0f + 50.0f * n), 170.0f + 40.0f * n };
+			default:  // behind
+				return { a_slot == 0 ? 0.0f : sign * t.side * n, -(t.back + 50.0f * n) };
+			}
+		}
+
+		RE::NiPoint3 SpotInWorld(RE::Actor* a_player, RE::NiPoint2 a_spot)
+		{
+			float z = a_player->GetAngleZ();
+			RE::NiPoint3 fwd{ std::sin(z), std::cos(z), 0.0f };
+			RE::NiPoint3 right{ std::cos(z), -std::sin(z), 0.0f };
+			return a_player->GetPosition() + right * a_spot.x + fwd * a_spot.y;
+		}
+
 		void ApplyOffset(RE::Actor* a, FollowerState& s, RE::PlayerCharacter* a_player, int a_mode, int a_slot)
 		{
-			if (s.offsetMode == a_mode && s.offsetSlot == a_slot) return;
+			// re-applied every few seconds: teleports, doors and loads silently drop it
+			if (s.offsetMode == a_mode && s.offsetSlot == a_slot && g_time - s.offsetApplied < 3.0f) return;
 			auto& t = kTuning[a_mode];
-			float side = a_slot == 0 ? 0.0f : (a_slot % 2 ? 1.0f : -1.0f) * t.side * static_cast<float>((a_slot + 1) / 2);
-			float back = -(t.back + 50.0f * static_cast<float>((a_slot + 1) / 2));
-			Papyrus::KeepOffset(a, a_player, side, back, t.catchUpRadius, t.followRadius);
-			logger::info("{} keeps offset ({:.0f}, {:.0f}) mode {}", Name(a), side, back, a_mode);
+			auto  spot = OffsetSpot(a_mode, a_slot);
+			Papyrus::KeepOffset(a, a_player, spot.x, spot.y, t.catchUpRadius, t.followRadius);
+			if (s.offsetMode != a_mode || s.offsetSlot != a_slot) {
+				logger::info("{} keeps offset ({:.0f}, {:.0f}) mode {}", Name(a), spot.x, spot.y, a_mode);
+			}
 			s.offsetMode = a_mode;
 			s.offsetSlot = a_slot;
+			s.offsetApplied = g_time;
 		}
 
 		// A sneaking actor can only walk: stand up to fight (a player stops sneaking once a fight is on).
@@ -1067,8 +1097,17 @@ namespace Followers
 			if (Driver::IsDriving(f)) return;
 
 			// ---- keep-offset follow
-			bool wantOffset = !busy && sameSpace && dist < 4000.0f &&
-			                  (recalling || (!inCombat && mode != 2));
+			// The keep-offset steers in a straight line and faces the player's way, so it is only used
+			// close to the player with a clear line to the spot. Further away, or with a fence or rock
+			// in between, the game's own follow (pathfinding, running facing forward, traversal jumps)
+			// brings the follower back.
+			bool wantOffset = !busy && sameSpace && (recalling || (!inCombat && mode != 2));
+			if (wantOffset && !recalling) {
+				auto spot = SpotInWorld(player, OffsetSpot(mode, a_slot));
+				bool clear = dist < 450.0f && Driver::ClearLine(f, f->GetPosition(), spot);
+				if (!clear) s.pathUntil = g_time + 1.5f;
+				wantOffset = g_time >= s.pathUntil;
+			}
 			if (wantOffset) {
 				ApplyOffset(f, s, player, recalling ? 0 : mode, a_slot);
 			} else {
@@ -1100,6 +1139,7 @@ namespace Followers
 					auto fwd = Forward(player);
 					Papyrus::MoveTo(f, player, -fwd.x * 200.0f, -fwd.y * 200.0f);
 					s.farSince = -1.0f;
+					s.offsetApplied = -100.0f;
 					Debug(std::format("{} caught up (teleport)", Name(f)));
 				}
 			} else {
