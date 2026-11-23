@@ -52,6 +52,7 @@ namespace Followers
 			int   overrides = 0;              // times the combat AI undid our weapon choice
 			float respectAIUntil = 0.0f;
 			float unreachableUntil = 0.0f;    // melee could not reach its target recently
+			float engagingUntil = 0.0f;       // just told to attack: the game may not show combat yet
 			// measured damage while holding each kind of weapon (0 melee, 1 ranged)
 			float dealt[2]{};
 			float heldTime[2]{};
@@ -366,7 +367,11 @@ namespace Followers
 			if (!Alive(a_target) || CombatTarget(a) == a_target) return;
 			ClearOffset(a, s);
 			s.lastRetarget = g_time;
+			s.engagingUntil = g_time + 2.0f;
 			s.missedSwings = 0;
+			s.stuckSince = -1.0f;
+			s.sampleTime = g_time;
+			s.samplePos = a->GetPosition();
 			Papyrus::StartCombat(a, a_target);
 			Debug(std::format("{} -> {} ({})", Name(a), Name(a_target), a_why));
 		}
@@ -694,7 +699,8 @@ namespace Followers
 			auto& tune = kTuning[mode];
 			float leash = kTuning[combatMode].combatLeash;
 			float dist = Dist(f, player);
-			bool  inCombat = f->IsInCombat();
+			bool  engaging = g_time < s.engagingUntil;
+			bool  inCombat = f->IsInCombat() || engaging;
 			bool  waiting = IsWaiting(f);
 			auto  state = f->AsActorState();
 			bool  busy = waiting || InScene(f) || f->IsOnMount() || player->IsOnMount() ||
@@ -761,7 +767,7 @@ namespace Followers
 			}
 
 			// ---- out of combat: match the player's weapon choice
-			if (!inCombat && !recalling && cfg.matchWeapons && !busy) {
+			if (!inCombat && !recalling && cfg.matchWeapons && !busy && !player->IsInCombat()) {
 				int playerRanged = player->AsActorState()->IsWeaponDrawn() ? (IsRanged(player) ? 1 : 0) : -1;
 				if (playerRanged >= 0 && playerRanged != (IsRanged(f) ? 1 : 0)) {
 					auto& options = GetLoadout(f, s);
@@ -786,6 +792,7 @@ namespace Followers
 			}
 
 			auto target = CombatTarget(f);
+			if (engaging && !f->IsInCombat()) return;
 
 			// ---- retarget when the target is gone
 			if (cfg.retarget && !Alive(target) && g_time - s.lastRetarget > 0.5f) {
@@ -853,8 +860,9 @@ namespace Followers
 				if (attacker && Alive(attacker) && attacker != target && g_time - s.lastAttackedTime < 4.0f) {
 					StartCombat(f, s, attacker, "can't reach target, fighting attacker");
 				} else {
-					Papyrus::StopCombat(f);
+					f->EvaluatePackage(true, false);
 					Papyrus::StartCombat(f, target);
+					s.engagingUntil = g_time + 2.0f;
 					Debug(std::format("{} can't reach {}, re-pathing", Name(f), Name(target)));
 				}
 			}
