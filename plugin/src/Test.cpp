@@ -18,11 +18,13 @@ namespace Test
 		// Base actors from Skyrim.esm (leveled to the player like any bandit).
 		constexpr RE::FormID kBanditMelee = 0x1BCD8;   // EncBandit01Melee1HNordM
 		constexpr RE::FormID kBanditArcher = 0x37C00;  // EncBandit01MissileNordM
+		constexpr RE::FormID kBerserker = 0x3DEA5;     // EncBandit02Melee2HBerserkNordM (power attacks a lot)
 
 		std::vector<Spawn> Scenario(std::string_view a_name)
 		{
 			if (a_name == "melee_rush") return { { kBanditMelee, 1500.0f, -150.0f }, { kBanditMelee, 1600.0f, 150.0f } };
 			if (a_name == "duel") return { { kBanditMelee, 900.0f, 0.0f } };
+			if (a_name == "brute") return { { kBerserker, 900.0f, 0.0f } };
 			if (a_name == "archers") return { { kBanditArcher, 2200.0f, -300.0f }, { kBanditArcher, 2300.0f, 300.0f } };
 			// mixed: one melee charging, two archers behind
 			return { { kBanditMelee, 1400.0f, 0.0f }, { kBanditArcher, 2200.0f, -400.0f }, { kBanditArcher, 2300.0f, 400.0f } };
