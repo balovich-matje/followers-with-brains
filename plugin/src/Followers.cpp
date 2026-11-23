@@ -770,6 +770,22 @@ namespace Followers
 				if (!f || !Alive(f)) continue;
 				auto& r = g_reflex[f->GetFormID()];
 
+				if (r.action == 3 && g_time - r.bashTime > 0.2f && g_time - r.bashTime < 0.35f &&
+					f->AsActorState()->GetAttackState() != RE::ATTACK_STATE_ENUM::kBash) {
+					// the bash did not happen: fall back to stepping out of reach
+					auto e = Get(r.against);
+					EndReflex(f, r);
+					if (Alive(e)) {
+						Papyrus::KeepOffset(f, e, 0.0f, 400.0f, 30.0f, 10.0f);
+						r.offset = true;
+						r.action = 1;
+						r.until = g_time + 0.7f;
+						r.punishAt = r.until + 0.05f;
+						r.against = e->GetHandle();
+						++g_stats.stepOuts;
+						logger::info("{}: bash did not start, stepping out instead", Name(f));
+					}
+				}
 				if (r.action != 0 && g_time >= r.until) {
 					// a bash that did not stagger counts against that enemy
 					if (r.action == 3) {
@@ -811,8 +827,11 @@ namespace Followers
 						continue;
 					}
 
-					bool starting = prev == RE::ATTACK_STATE_ENUM::kNone &&
-					                (state == RE::ATTACK_STATE_ENUM::kDraw || state == RE::ATTACK_STATE_ENUM::kSwing);
+					// a new attack: winding up or swinging now, and not a moment ago (chained attacks skip kNone)
+					auto windup = [](RE::ATTACK_STATE_ENUM a) {
+						return a == RE::ATTACK_STATE_ENUM::kDraw || a == RE::ATTACK_STATE_ENUM::kSwing;
+					};
+					bool starting = windup(state) && !windup(prev);
 					if (starting) ++g_stats.enemyAttacks;
 					// the attack is meant for us if we are its target, or we are in front of it and within reach
 					bool aimedAtUs = CombatTarget(e) == f;
