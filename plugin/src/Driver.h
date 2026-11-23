@@ -37,6 +37,7 @@ namespace Driver
 		bool            zoneMirror = false;    // side placement: either side, whichever the follower is on
 		float           sprintSpeed = 715.0f;  // formation: top speed while the target sprints
 		RE::NiPoint3    landing;               // hop: where to land
+		float           looseness = 1.0f;      // formation: 1 tight; larger = bigger area, softer pull
 	};
 
 	bool Install();  // animation channel and action hooks (kDataLoaded)
@@ -46,6 +47,7 @@ namespace Driver
 	void Stop(RE::Actor* a_actor);
 	void StopAll();
 	bool IsDriving(RE::Actor* a_actor);
+	void SetLooseness(RE::Actor* a_actor, float a_looseness);  // formation in progress
 
 	// True when nothing solid (terrain, walls, rocks, fences) lies on the straight line between the
 	// two points, at chest height. People are ignored.

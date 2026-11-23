@@ -16,6 +16,11 @@ Work in progress.
   otherwise the game's own pathfinding brings them back (round fences and rocks, facing forward).
 - A follower stuck below a rock you are on, above a drop you went down, or at a fence jumps:
   up, down or over, with the game's own jump animations.
+- How close they keep depends on the moment: tightest with weapons drawn, looser with weapons
+  sheathed, loosest in cities, towns, inns and your homes. Turning on the spot, strafing or
+  backpedalling doesn't send them running round you.
+- In safe places, when you stay put for a while or are busy talking or crafting, followers relax:
+  they wander off to sit, lean and use furniture, and come back when you move on.
 - Followers that fall behind get a short speed boost. If they are still far away and out of
   sight, they are moved behind you.
 

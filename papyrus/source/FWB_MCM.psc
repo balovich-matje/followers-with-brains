@@ -14,7 +14,7 @@ String[] _toggleInfo
 Int[] _toggleOIDs
 
 Int Function GetVersion()
-	Return 5
+	Return 6
 EndFunction
 
 Event OnVersionUpdate(Int a_version)
@@ -40,10 +40,10 @@ Event OnConfigInit()
 	_placementNames[2] = "Ahead of you"
 	_placementNames[3] = "Around you"
 
-	_toggleKeys = new String[13]
-	_toggleNames = new String[13]
-	_toggleInfo = new String[13]
-	_toggleOIDs = new Int[13]
+	_toggleKeys = new String[14]
+	_toggleNames = new String[14]
+	_toggleInfo = new String[14]
+	_toggleOIDs = new Int[14]
 	SetToggle(0, "CatchUp", "Catch-up speed boost", "Followers who fall behind move faster until they catch up.")
 	SetToggle(1, "Teleport", "Teleport when far behind", "A follower who is still far behind after a few seconds, and out of your sight, is moved behind you.")
 	SetToggle(2, "CombatLeash", "Stay close in combat", "Followers stop chasing enemies that are far away from you.")
@@ -54,6 +54,7 @@ Event OnConfigInit()
 	SetToggle(7, "Retreat", "Retreat with you", "When you back away from a fight, followers come with you. Ranged followers keep shooting while they are close to you. Healing your party does not count as retreating.")
 	SetToggle(8, "Debug", "Debug messages", "Show what followers decide, as notifications.")
 	SetToggle(9, "SmartWeapons", "Ranged or melee by distance", "Followers who carry both pick by skill and distance: they shoot while enemies are far and switch to melee as enemies arrive (or the other way round for archers and mages).")
+	SetToggle(13, "Sandbox", "Relax in safe places", "In cities, towns, inns and your homes, with weapons sheathed and Medium or Far following: when you stay put for a while or are busy talking or crafting, followers wander off to sit, lean and use furniture, and come back when you move on.")
 	SetToggle(11, "Reflexes", "Reflexes", "The moment an enemy starts an attack on them, followers weigh it: take a light hit, block it, bash a power attack, or step out of reach and hit back. They also strike at once when an enemy staggers.")
 	SetToggle(12, "Zigzag", "Zig-zag toward archers", "Melee followers weave from side to side while closing in on archers and casters.")
 	SetToggle(10, "MatchWeapons", "Match your weapon", "Out of combat, when you draw a bow or an attack spell your followers draw their ranged weapon, and switch back when you draw a melee weapon.")
@@ -82,7 +83,7 @@ EndFunction
 
 Event OnPageReset(String a_page)
 	; a save made with an older version still has the old, shorter option lists
-	If !_toggleKeys || _toggleKeys.Length < 13 || !_toggleKeys[12] || !_placementNames || _placementNames.Length < 4
+	If !_toggleKeys || _toggleKeys.Length < 14 || !_toggleKeys[13] || !_placementNames || _placementNames.Length < 4
 		OnConfigInit()
 	EndIf
 	SetCursorFillMode(TOP_TO_BOTTOM)
@@ -123,6 +124,7 @@ Event OnPageReset(String a_page)
 		AddToggle(0)
 		AddToggle(1)
 		AddToggle(2)
+		AddToggle(13)
 		AddHeaderOption("Other")
 		AddToggle(8)
 	EndIf

@@ -195,6 +195,8 @@ namespace Driver
 			float       pickRange = 200.0f;
 			float       lastSpeed = 0.0f;
 			bool        hopStarted = false;
+			float       zoneHeading = 0.0f;
+			bool        zoneHeadingSet = false;
 			bool        hopFalling = false;
 			RE::NiPoint3 hopFrom;
 			int         lastWeaponState = -1;
@@ -209,9 +211,9 @@ namespace Driver
 		constexpr float kDeg = 0.01745329f;
 
 		// a point at angle (degrees, 0 = target's forward, + = right) and range from the target
-		RE::NiPoint3 Polar(RE::Actor* a_target, float a_angle, float a_range)
+		RE::NiPoint3 Polar(RE::Actor* a_target, float a_angle, float a_range, float a_heading = 999.0f)
 		{
-			float z = a_target->GetAngleZ() + a_angle * kDeg;
+			float z = (a_heading == 999.0f ? a_target->GetAngleZ() : a_heading) + a_angle * kDeg;
 			return a_target->GetPosition() + RE::NiPoint3{ std::sin(z), std::cos(z), 0.0f } * a_range;
 		}
 
@@ -222,12 +224,12 @@ namespace Driver
 			return a_currentAngle < 0.0f ? -a_order.zoneAngle : a_order.zoneAngle;
 		}
 
-		void ToPolar(RE::Actor* a_actor, RE::Actor* a_target, float& a_angle, float& a_range)
+		void ToPolar(RE::Actor* a_actor, RE::Actor* a_target, float& a_angle, float& a_range, float a_heading = 999.0f)
 		{
 			RE::NiPoint3 rel = a_actor->GetPosition() - a_target->GetPosition();
 			rel.z = 0.0f;
 			a_range = rel.Length();
-			float tz = a_target->GetAngleZ();
+			float tz = a_heading == 999.0f ? a_target->GetAngleZ() : a_heading;
 			float fwd = rel.x * std::sin(tz) + rel.y * std::cos(tz);
 			float right = rel.x * std::cos(tz) - rel.y * std::sin(tz);
 			a_angle = std::atan2(right, fwd) / kDeg;
@@ -439,40 +441,62 @@ namespace Driver
 					d.hasLastTarget = true;
 					float tSpeed = tv.Length();
 
-					// where the follower is in the target's frame, and the area it belongs in
+					// The area follows the way the target travels. Running forward it turns with the target
+					// quickly; turning on the spot, strafing or backpedalling it turns slowly, so a player
+					// looking around doesn't send the follower running round them.
+					float tHeading = target->GetAngleZ();
+					RE::NiPoint3 tFwd{ std::sin(tHeading), std::cos(tHeading), 0.0f };
+					bool forward = tSpeed > 120.0f && (tv.x * tFwd.x + tv.y * tFwd.y) / tSpeed > 0.5f;
+					if (!d.zoneHeadingSet) {
+						d.zoneHeading = tHeading;
+						d.zoneHeadingSet = true;
+					}
+					d.zoneHeading = TurnToward(d.zoneHeading, tHeading, (forward ? 3.0f : 0.6f) * std::min(a_delta, 0.05f));
+					float zh = d.zoneHeading;
+
+					// looser in calm situations: a bigger area, a softer pull
+					float loose = std::max(1.0f, d.order.looseness);
+					float zNear = d.order.zoneNear * loose;
+					float zFar = d.order.zoneFar * loose;
+					float zHalf = std::min(180.0f, d.order.zoneHalf + (loose - 1.0f) * 25.0f);
+
+					// where the follower is in the area's frame
 					float angle, range;
-					ToPolar(a, target, angle, range);
+					ToPolar(a, target, angle, range, zh);
 					float centre = ZoneCentre(d.order, angle);
-					bool  inZone = std::fabs(AngleDiff(angle, centre)) <= d.order.zoneHalf && range >= d.order.zoneNear && range <= d.order.zoneFar;
+					bool  inZone = std::fabs(AngleDiff(angle, centre)) <= zHalf && range >= zNear && range <= zFar;
 					if (range > 1500.0f) return "too far";
 
 					// a personal spot inside the area, picked again every few seconds: a little wandering
-					if (d.elapsed >= d.nextPick || std::fabs(AngleDiff(d.pickAngle, centre)) > d.order.zoneHalf + 1.0f) {
+					if (d.elapsed >= d.nextPick || std::fabs(AngleDiff(d.pickAngle, centre)) > zHalf + 1.0f) {
 						float r = static_cast<float>(std::rand() % 1000) / 1000.0f;
 						float q = static_cast<float>(std::rand() % 1000) / 1000.0f;
-						d.pickAngle = centre + (r * 2.0f - 1.0f) * d.order.zoneHalf * 0.8f;
-						d.pickRange = d.order.zoneNear + (d.order.zoneFar - d.order.zoneNear) * (0.25f + q * 0.5f);
+						d.pickAngle = centre + (r * 2.0f - 1.0f) * zHalf * 0.8f;
+						d.pickRange = zNear + (zFar - zNear) * (0.25f + q * 0.5f);
 						d.nextPick = d.elapsed + 5.0f + static_cast<float>(std::rand() % 400) / 100.0f;
 					}
 					RE::NiPoint3 aim;
 					float        gain;
 					if (inZone) {
-						aim = Polar(target, d.pickAngle, d.pickRange);  // drift toward the personal spot
-						gain = 0.5f;
+						aim = Polar(target, d.pickAngle, d.pickRange, zh);  // drift toward the personal spot
+						gain = 0.5f / loose;
 					} else {
 						// nearest point of the area
-						float ca = centre + std::clamp(AngleDiff(angle, centre), -d.order.zoneHalf, d.order.zoneHalf);
-						float cr = std::clamp(range, d.order.zoneNear, d.order.zoneFar);
-						aim = Polar(target, ca, cr);
-						gain = 1.4f;
+						float ca = centre + std::clamp(AngleDiff(angle, centre), -zHalf, zHalf);
+						float cr = std::clamp(range, zNear, zFar);
+						aim = Polar(target, ca, cr, zh);
+						gain = 1.4f / loose;
 					}
 					RE::NiPoint3 toAim = aim - pos;
 					toAim.z = 0.0f;
 					float gap = toAim.Length();
 					if (inZone && tSpeed < 30.0f && gap < 80.0f && d.lastSpeed < 30.0f) return "in place";
 
-					// velocity: go along with the target, plus a pull toward the aim point
-					RE::NiPoint3 want = tv + (gap > 1.0f ? toAim / gap : RE::NiPoint3{}) * std::min(gap * gain, 400.0f);
+					// velocity: go along with the target (fully when it runs forward, partly when it strafes or
+					// backpedals, less in calm situations), plus a pull toward the aim point
+					float mirror = (forward ? 1.0f : 0.4f) / std::sqrt(loose);
+					if (inZone && !forward) mirror *= 0.5f;
+					RE::NiPoint3 want = tv * mirror + (gap > 1.0f ? toAim / gap : RE::NiPoint3{}) * std::min(gap * gain, 400.0f);
 					want.z = 0.0f;
 					bool  sprinting = target->AsActorState()->IsSprinting();
 					float top = (sprinting ? d.order.sprintSpeed : d.order.speed) * 1.05f;
@@ -484,10 +508,10 @@ namespace Driver
 					if (wantSpeed < 15.0f && current < 40.0f) speedNow = 0.0f;
 					d.lastSpeed = speedNow;
 					d.speedNow = speedNow;
-					move = want.Length() > 1.0f ? want / want.Length() : Polar(target, 0.0f, 1.0f) - targetPos;
+					move = want.Length() > 1.0f ? want / want.Length() : Polar(target, 0.0f, 1.0f, zh) - targetPos;
 					move.z = 0.0f;
 					if (move.Length() > 0.0f) move = move / move.Length();
-					face = speedNow > 40.0f ? Heading(move) : Heading(Polar(target, 0.0f, 100.0f) - pos);
+					face = speedNow > 40.0f ? Heading(move) : Heading(Polar(target, 0.0f, 100.0f, zh) - pos);
 					d.wantSprint = sprinting && speedNow > d.order.speed * 1.05f;
 					break;
 				}
@@ -695,6 +719,13 @@ namespace Driver
 		RE::NiPoint3 d = nearest - a_actor->GetPosition();
 		d.z = 0.0f;
 		return d.Length();
+	}
+
+	void SetLooseness(RE::Actor* a_actor, float a_looseness)
+	{
+		if (!a_actor) return;
+		auto it = g_drives.find(a_actor->GetFormID());
+		if (it != g_drives.end()) it->second.order.looseness = a_looseness;
 	}
 
 	bool IsDriving(RE::Actor* a_actor) { return a_actor && g_drives.contains(a_actor->GetFormID()); }

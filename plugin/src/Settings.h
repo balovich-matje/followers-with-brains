@@ -17,6 +17,7 @@ namespace Settings
 		int  combatDistance = 0;  // how far from the player followers fight
 		int  placement = 0;       // close following: 0 behind, 1 at the side, 2 ahead, 3 anywhere around
 		bool catchUp = true;
+		bool sandbox = true;      // relax (wander, sit, use furniture) in safe places while the player lingers
 		bool teleport = true;
 		bool combatLeash = true;
 

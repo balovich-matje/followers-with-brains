@@ -31,6 +31,7 @@ namespace Settings
 		};
 		constexpr BoolField kBools[] = {
 			{ "CatchUp"sv, &Values::catchUp },
+			{ "Sandbox"sv, &Values::sandbox },
 			{ "Teleport"sv, &Values::teleport },
 			{ "CombatLeash"sv, &Values::combatLeash },
 			{ "Awareness"sv, &Values::awareness },

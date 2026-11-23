@@ -55,6 +55,9 @@ namespace Followers
 			float stallSince = -1.0f;
 			RE::NiPoint3 followSample;
 			float followSampleTime = -100.0f;
+			bool  sandboxing = false;
+			float looseness = 1.0f;
+			float otherSpaceSince = -1.0f;
 			float driveStarted = -100.0f;
 			bool  formationDrive = false;
 			float speedBoost = 0.0f;
@@ -464,6 +467,55 @@ namespace Followers
 			s.stallSince = -1.0f;
 			Debug(std::format("{} hops {}", Name(f), what));
 			return true;
+		}
+
+		// A city, town, inn, store, temple or player home, not inside a dungeon. Out of combat only.
+		bool InSafePlace(RE::PlayerCharacter* a_player)
+		{
+			if (a_player->IsInCombat()) return false;
+			auto loc = a_player->GetCurrentLocation();
+			if (!loc) return false;
+			static constexpr std::string_view kDanger[] = { "LocTypeDungeon"sv, "LocTypeClearable"sv, "LocTypeBanditCamp"sv,
+				"LocTypeDraugrCrypt"sv, "LocTypeAnimalDen"sv, "LocTypeDwarvenAutomatons"sv };
+			for (auto k : kDanger) {
+				if (loc->HasKeywordString(k)) return false;
+			}
+			static constexpr std::string_view kSafe[] = { "LocTypePlayerHouse"sv, "LocTypeCity"sv, "LocTypeTown"sv,
+				"LocTypeInn"sv, "LocTypeStore"sv, "LocTypeTemple"sv, "LocTypeHouse"sv, "LocTypeSettlement"sv };
+			for (int depth = 0; loc && depth < 6; ++depth, loc = loc->parentLoc) {
+				for (auto k : kSafe) {
+					if (loc->HasKeywordString(k)) return true;
+				}
+			}
+			return false;
+		}
+
+		// how long the player has stayed within a few meters, or been busy in a menu
+		RE::NiPoint3 g_lingerAt;
+		float        g_lingerSince = 0.0f;
+		RE::TESObjectCELL* g_lingerCell = nullptr;
+		float        g_menuSince = -1.0f;
+		float        g_lingerSeconds = 0.0f;
+
+		float PlayerLingering(RE::PlayerCharacter* a_player)
+		{
+			auto pos = a_player->GetPosition();
+			if (a_player->GetParentCell() != g_lingerCell || pos.GetDistance(g_lingerAt) > 350.0f) {
+				g_lingerAt = pos;
+				g_lingerCell = a_player->GetParentCell();
+				g_lingerSince = g_time;
+			}
+			auto ui = RE::UI::GetSingleton();
+			bool busy = ui && (ui->IsMenuOpen(RE::DialogueMenu::MENU_NAME) || ui->IsMenuOpen(RE::CraftingMenu::MENU_NAME) ||
+			                      ui->IsMenuOpen(RE::BarterMenu::MENU_NAME));
+			if (busy) {
+				if (g_menuSince < 0.0f) g_menuSince = g_time;
+			} else {
+				g_menuSince = -1.0f;
+			}
+			float lingered = g_time - g_lingerSince;
+			if (g_menuSince >= 0.0f && g_time - g_menuSince > 3.0f) lingered = std::max(lingered, 15.0f);
+			return lingered;
 		}
 
 		// The area a follower keeps around the player (placement only applies to Close following).
@@ -1179,6 +1231,44 @@ namespace Followers
 			bool  sameSpace = f->GetWorldspace() == player->GetWorldspace() &&
 			                 (player->GetWorldspace() || f->GetParentCell() == player->GetParentCell());
 
+			// ---- relax in safe places: while the player lingers (sheathed, Medium/Far following), the
+			// follower is put on "wait" (the game's own sandboxing: wander, sit, use furniture) until the
+			// player walks off, draws a weapon or leaves.
+			{
+				bool safe = InSafePlace(player);
+				bool drawn = player->AsActorState()->IsWeaponDrawn();
+				bool relax = cfg.sandbox && safe && !drawn && mode != 0 && !inCombat && !player->IsInCombat() &&
+				             g_lingerSeconds >= 15.0f && sameSpace;
+				if (relax && !s.sandboxing && !Driver::IsDriving(f) && f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kWaitingForPlayer) <= 0.0f) {
+					SetMod(f, s, RE::ActorValue::kWaitingForPlayer, 1.0f);
+					s.sandboxing = true;
+					f->EvaluatePackage(true, false);
+					Debug(std::format("{} relaxes", Name(f)));
+				} else if (s.sandboxing && !relax) {
+					SetMod(f, s, RE::ActorValue::kWaitingForPlayer, 0.0f);
+					s.sandboxing = false;
+					f->EvaluatePackage(true, false);
+					Debug(std::format("{} follows again", Name(f)));
+				}
+				if (s.sandboxing) return;
+				// formation looseness: drawn weapon outside = tight; sheathed = looser; safe places = loosest
+				s.looseness = drawn && !safe ? 1.0f : (safe ? 2.0f : 1.4f);
+				if (s.formationDrive) Driver::SetLooseness(f, s.looseness);
+
+				// a follower left in another area (a door the player went through) is brought over
+				if (!sameSpace && !waiting && !InScene(f) && !player->IsInCombat()) {
+					if (s.otherSpaceSince < 0.0f) s.otherSpaceSince = g_time;
+					if (g_time - s.otherSpaceSince > 4.0f) {
+						auto fwd = Forward(player);
+						Papyrus::MoveTo(f, player, -fwd.x * 150.0f, -fwd.y * 150.0f);
+						s.otherSpaceSince = -1.0f;
+						Debug(std::format("{} caught up (other area)", Name(f)));
+					}
+				} else {
+					s.otherSpaceSince = -1.0f;
+				}
+			}
+
 			// ---- retreat / recall: head back to the player
 			bool recalling = !waiting && !busy && (g_retreating || g_time < s.recallUntil);
 			bool coverFire = false;
@@ -1248,6 +1338,7 @@ namespace Followers
 					Driver::ClearLine(f, f->GetPosition(), nearest)) {
 					order.speed = Tuning::Get().chargeSpeed;  // a run
 					order.sprintSpeed = 715.0f;               // a player's sprint (measured)
+					order.looseness = s.looseness;
 					order.duration = 3600.0f;
 					if (Driver::Start(f, order)) s.pathNoted = false;
 					s.driveStarted = g_time;
@@ -1508,6 +1599,7 @@ namespace Followers
 			if (Settings::Get().awareness) UpdateWatch(scan);
 			UpdateRetreat(scan);
 
+			g_lingerSeconds = PlayerLingering(a_player);
 			int slot = 0;
 			for (auto f : scan.followers) {
 				UpdateFollower(f, slot++, scan);
