@@ -51,7 +51,7 @@ namespace Tactics
 		auto npc = a_follower ? a_follower->GetActorBase() : nullptr;
 		if (!npc) return;
 		auto& cfg = Settings::Get();
-		if (!cfg.reflexes && !cfg.zigzag) {
+		if (!cfg.combatMovement || (!cfg.reflexes && !cfg.zigzag)) {
 			Restore(a_follower);
 			return;
 		}
