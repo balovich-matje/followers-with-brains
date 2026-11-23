@@ -497,6 +497,7 @@ namespace Followers
 		float        g_menuSince = -1.0f;
 		float        g_lingerSeconds = 0.0f;
 		int          g_lastSafe = -1;
+		float        g_lastDrawn = -1000.0f;
 
 		float PlayerLingering(RE::PlayerCharacter* a_player)
 		{
@@ -766,12 +767,13 @@ namespace Followers
 
 			if (!g_retreating) {
 				bool  sprint = player->AsActorState()->IsSprinting();
-				auto  old = sampleAgo(sprint ? 0.8f : 1.5f);
-				if (!old || g_time - old->time < (sprint ? 0.6f : 1.2f)) return;
+				auto  old = sampleAgo(sprint ? 1.2f : 2.0f);
+				if (!old || g_time - old->time < (sprint ? 1.0f : 1.8f)) return;
 				float gained = nearest - old->enemyDistance;
 				float moved = now.GetDistance(old->playerPos);
-				bool  attacking = g_time - g_lastPlayerAttack < 1.5f;
-				if (gained > 150.0f && moved > 200.0f && !attacking && !healing) {
+				bool  attacking = g_time - g_lastPlayerAttack < 3.0f;
+				// a real retreat: well away from every enemy, moving steadily, not fighting
+				if (gained > 350.0f && moved > 450.0f && nearest > 600.0f && !attacking && !healing) {
 					g_retreating = true;
 					g_retreatStart = g_time;
 					Debug(std::format("Retreat! (gained {:.0f}, moved {:.0f})", gained, moved));
@@ -868,6 +870,7 @@ namespace Followers
 			float cooldownUntil = 0.0f;
 			float punishAt = -1.0f;
 			float dodgeReadyAt = 0.0f;
+			bool  punishApproachStarted = false;
 			RE::ActorHandle against;
 			float bashTime = -100.0f;
 			bool  offset = false;
@@ -1025,6 +1028,7 @@ namespace Followers
 				if (r.action == 1 && !Driver::IsDriving(f)) {
 					EndReflex(f, r);
 					r.punishAt = g_time;
+					r.punishApproachStarted = false;
 				}
 				if (r.action != 0 && g_time >= r.until) {
 					// a bash that did not stagger counts against that enemy
@@ -1049,7 +1053,10 @@ namespace Followers
 						++g_stats.punishes;
 						r.punishAt = -1.0f;
 						Debug(std::format("{}: punish {}", Name(f), Name(e)));
+					} else if (!Driver::IsDriving(f) && r.punishApproachStarted && std::string_view{ Driver::LastEnd(f) } != "arrived") {
+						r.punishAt = -1.0f;  // the way in is blocked: let the combat AI take it from here
 					} else if (!Driver::IsDriving(f)) {
+						r.punishApproachStarted = true;
 						Driver::Order order;
 						order.kind = Driver::Kind::kRunTo;
 						order.target = e->GetHandle();
@@ -1238,8 +1245,10 @@ namespace Followers
 			{
 				bool safe = InSafePlace(player);
 				bool drawn = player->AsActorState()->IsWeaponDrawn();
+				if (drawn) g_lastDrawn = g_time;
+				float needLinger = g_time - g_lastDrawn < 60.0f ? 30.0f : 15.0f;  // weapons were out: wait longer
 				bool relax = cfg.sandbox && safe && !drawn && mode != 0 && !inCombat && !player->IsInCombat() &&
-				             g_lingerSeconds >= 15.0f && sameSpace;
+				             g_lingerSeconds >= needLinger && sameSpace;
 				if (safe != g_lastSafe) {
 					g_lastSafe = safe;
 					auto loc = player->GetCurrentLocation();
@@ -1259,7 +1268,7 @@ namespace Followers
 				}
 				if (s.sandboxing) return;
 				// formation looseness: drawn weapon outside = tight; sheathed = looser; safe places = loosest
-				s.looseness = drawn && !safe ? 1.0f : (safe ? 2.0f : 1.4f);
+				s.looseness = drawn ? 1.0f : (safe ? 2.0f : 1.4f);
 				if (s.formationDrive) Driver::SetLooseness(f, s.looseness);
 
 				// a follower left in another area (a door the player went through) is brought over

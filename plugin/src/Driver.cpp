@@ -303,6 +303,9 @@ namespace Driver
 			}
 			ReleaseSlot(reinterpret_cast<std::uintptr_t>(a_actor));
 			SetDriven(id, false);
+			// While driven, the AI's own "stop moving" was refused: stop the legs now, or the graph stays
+			// in its moving state at no speed (drifting in place, no idles, no furniture).
+			if (a_drive.order.kind != Kind::kHop) Send(a_actor, "moveStop"sv);
 			g_lastEnd[id] = std::string{ a_why };
 			logger::info("{}: drive ended ({}, {:.1f}s{})", a_actor->GetDisplayFullName(), a_why, a_drive.elapsed,
 				a_drive.sprintKicks ? std::format(", sprint restarted {}x", a_drive.sprintKicks) : std::string{});
