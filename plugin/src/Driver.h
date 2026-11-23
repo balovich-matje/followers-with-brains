@@ -1,0 +1,38 @@
+#pragma once
+
+// Movement driver: for a short moment the plugin moves a follower's body itself (position, heading,
+// physics velocity) along a planned path, and makes the legs animate to match (speed, direction and
+// turn channels of the animation graph). The combat AI's own movement and attacks are held off
+// while a follower is driven. Used for moves the combat AI won't make on request: a weaving sprint
+// at a shooter, a quick step back out of a power attack, turning and running with the player.
+// Works on any runtime the plugin loads on (no modpack-specific data).
+namespace Driver
+{
+	enum class Kind
+	{
+		kCharge,    // run at the target, weaving side to side, facing it
+		kStepBack,  // back away from the target, facing it
+		kRunTo      // run toward the target (e.g. the player), facing the way it runs
+	};
+
+	struct Order
+	{
+		Kind            kind = Kind::kCharge;
+		RE::ActorHandle target;
+		float           speed = 450.0f;        // units per second
+		float           duration = 10.0f;      // seconds, at most
+		float           stopDistance = 450.0f;  // charge/run: done this close; step back: done this far
+		bool            sprint = false;        // show the sprint animation if the graph has one
+	};
+
+	bool Install();  // animation channel and action hooks (kDataLoaded)
+	void Frame(float a_delta);  // every frame, main thread
+
+	bool Start(RE::Actor* a_actor, const Order& a_order);
+	void Stop(RE::Actor* a_actor);
+	void StopAll();
+	bool IsDriving(RE::Actor* a_actor);
+
+	// Why the last drive of this actor ended (for logs and tests).
+	const char* LastEnd(RE::Actor* a_actor);
+}

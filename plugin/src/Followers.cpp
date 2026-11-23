@@ -1,4 +1,5 @@
 #include "Followers.h"
+#include "Driver.h"
 #include "Loadout.h"
 #include "Papyrus.h"
 #include "Settings.h"
@@ -753,8 +754,13 @@ namespace Followers
 					if (auto weap = e->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
 						reach = std::max(150.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
 					}
-					Papyrus::KeepOffset(f, e, 0.0f, reach + 150.0f, 30.0f, 10.0f, 180.0f);
-					r.offset = true;
+					Driver::Order order;
+					order.kind = Driver::Kind::kStepBack;
+					order.target = e->GetHandle();
+					order.speed = 480.0f;
+					order.stopDistance = Dist(f, e) + reach * 0.6f + 120.0f;
+					order.duration = power ? 0.7f : 0.5f;
+					Driver::Start(f, order);
 					r.action = 1;
 					r.until = g_time + (power ? 0.9f : 0.6f);
 					r.punishAt = r.until + 0.05f;
@@ -795,8 +801,13 @@ namespace Followers
 					auto e = Get(r.against);
 					EndReflex(f, r);
 					if (Alive(e)) {
-						Papyrus::KeepOffset(f, e, 0.0f, 400.0f, 30.0f, 10.0f, 180.0f);
-						r.offset = true;
+						Driver::Order order;
+						order.kind = Driver::Kind::kStepBack;
+						order.target = e->GetHandle();
+						order.speed = 480.0f;
+						order.stopDistance = Dist(f, e) + 250.0f;
+						order.duration = 0.6f;
+						Driver::Start(f, order);
 						r.action = 1;
 						r.until = g_time + 0.7f;
 						r.punishAt = r.until + 0.05f;
@@ -868,85 +879,38 @@ namespace Followers
 		}
 
 		// ------------------------------------------------------------------ charging shooters
-		// In combat the game's AI walks a melee follower at an archer while facing it, which ignores
-		// any movement we ask for. So for the run-up the follower leaves combat, runs a weaving path
-		// toward the shooter (faster than usual, like a sprint), and re-enters combat once close.
-		struct ZigState
-		{
-			bool            active = false;
-			RE::ActorHandle target;
-			float           started = 0.0f;
-			float           nextFlip = 0.0f;
-			int             side = 1;
-		};
-		std::unordered_map<RE::FormID, ZigState> g_zig;
-
-		constexpr float kChargeEnd = 500.0f;     // re-enter combat this close
+		constexpr float kChargeStop = 350.0f;    // hand back to the combat AI this close
 		constexpr float kChargeStart = 700.0f;   // only worth it from this far
 		constexpr float kSprintReach = 1100.0f;  // about two seconds of sprinting
+		std::unordered_map<RE::FormID, float> g_nextCharge;
 
-		void EndCharge(RE::Actor* f, FollowerState& s, ZigState& z, bool a_attack)
-		{
-			auto target = Get(z.target);
-			Papyrus::ClearOffset(f);
-			s.offsetMode = -1;
-			s.offsetSlot = -1;
-			SetBoost(f, s, 0.0f);
-			z.active = false;
-			if (a_attack && Alive(target)) {
-				s.lastRetarget = g_time;
-				s.engagingUntil = g_time + 2.0f;
-				Papyrus::StartCombat(f, target);
-			}
-		}
-
-		// Returns true while the follower is charging (the rest of the per-follower logic is skipped).
-		bool UpdateCharge(RE::Actor* f, FollowerState& s)
+		// A melee fighter charges a shooter: the driver runs it at sprint speed on a weaving path,
+		// facing the shooter, then the combat AI takes over at sword range.
+		bool MaybeCharge(RE::Actor* f, FollowerState& s, RE::Actor* a_target)
 		{
 			auto& cfg = Settings::Get();
-			auto& z = g_zig[f->GetFormID()];
-			auto& r = g_reflex[f->GetFormID()];
-
-			if (!z.active) {
-				// Retired: strafing now comes from the tuned combat style (in combat, facing the enemy).
-				if (true || !cfg.zigzag || !f->IsInCombat() || r.action != 0 || g_retreating) return false;
-				auto target = CombatTarget(f);
-				if (!Alive(target) || !IsRanged(target)) return false;
-				float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
-				if (GetLoadout(f, s).PrefersRanged(bias)) return false;  // archers and mages don't charge
-				float d = Dist(f, target);
-				// Far: charge right away. Close/Medium: shoot first, charge from about two seconds away.
-				float startAt = cfg.combatDistance == 2 ? 4000.0f : kSprintReach;
-				if (d < kChargeStart || d > startAt) return false;
-				z.active = true;
-				z.target = target->GetHandle();
-				z.started = g_time;
-				z.nextFlip = 0.0f;
-				++g_stats.zigzags;
-				SetWeaponPref(f, 1);
-				Swap(f, s, false, "charging a shooter");
-				Debug(std::format("{} charges {}", Name(f), Name(target)));
-			}
-
-			auto  target = Get(z.target);
-			float d = Alive(target) ? Dist(f, target) : 0.0f;
-			if (!Alive(target) || d <= kChargeEnd || g_time - z.started > 15.0f || g_retreating) {
-				EndCharge(f, s, z, Alive(target) && !g_retreating);
-				return false;
-			}
-			if (f->IsInCombat() && g_time - s.lastStop > 0.4f) {
-				Papyrus::StopCombat(f);
-				s.lastStop = g_time;
-			}
-			if (!f->AsActorState()->IsWeaponDrawn()) f->DrawWeaponMagicHands(true);
-			SetBoost(f, s, 40.0f);
-			if (g_time >= z.nextFlip) {
-				z.side = -z.side;
-				z.nextFlip = g_time + 0.7f + static_cast<float>(std::rand() % 50) / 100.0f;
-				// a point ~500 units further along, ~300 to the side (target-local: +y is toward us)
-				float ahead = std::max(kChargeEnd - 100.0f, d - 500.0f);
-				Papyrus::KeepOffset(f, target, static_cast<float>(z.side) * 300.0f, ahead, 60.0f, 30.0f, 180.0f);
-			}
+			if (!cfg.zigzag || !Alive(a_target) || !IsRanged(a_target) || g_retreating) return false;
+			if (g_reflex[f->GetFormID()].action != 0) return false;
+			if (g_time < g_nextCharge[f->GetFormID()]) return false;
+			float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
+			if (GetLoadout(f, s).PrefersRanged(bias)) return false;  // archers and mages don't charge
+			float d = Dist(f, a_target);
+			// Far: charge right away. Close/Medium: trade shots first, charge from about two seconds away.
+			float startAt = cfg.combatDistance == 2 ? 4000.0f : kSprintReach;
+			if (d < kChargeStart || d > startAt) return false;
+			SetWeaponPref(f, 1);
+			Swap(f, s, false, "charging a shooter");
+			Driver::Order order;
+			order.kind = Driver::Kind::kCharge;
+			order.target = a_target->GetHandle();
+			order.speed = 520.0f;
+			order.stopDistance = kChargeStop;
+			order.duration = 10.0f;
+			order.sprint = true;
+			if (!Driver::Start(f, order)) return false;
+			g_nextCharge[f->GetFormID()] = g_time + 4.0f;
+			++g_stats.zigzags;
+			Debug(std::format("{} charges {}", Name(f), Name(a_target)));
 			return true;
 		}
 
@@ -1041,12 +1005,24 @@ namespace Followers
 				} else {
 					if (inCombat && g_time - s.lastStop > 0.3f) Disengage(f, s);
 					SetFleeing(f, s, false);
+					// turn and run: the driver runs the body to the player, facing the way it goes
+					if (!Driver::IsDriving(f) && dist > 300.0f && sameSpace) {
+						Driver::Order order;
+						order.kind = Driver::Kind::kRunTo;
+						order.target = player->GetHandle();
+						order.speed = 500.0f;
+						order.stopDistance = 250.0f;
+						order.duration = 4.0f;
+						order.sprint = true;
+						Driver::Start(f, order);
+					}
 				}
 			} else {
 				SetFleeing(f, s, false);
 			}
 
-			if (!recalling && UpdateCharge(f, s)) return;
+			// the driver moves this follower right now: leave it alone
+			if (Driver::IsDriving(f)) return;
 
 			// ---- keep-offset follow
 			bool wantOffset = !busy && sameSpace && dist < 4000.0f &&
@@ -1137,6 +1113,7 @@ namespace Followers
 			}
 
 			// ---- ranged or melee
+			if (MaybeCharge(f, s, target)) return;
 			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
 			if (Dist(f, target) > 300.0f) StandUp(f);
 
@@ -1392,6 +1369,7 @@ namespace Followers
 		PlayerUpdate::func = vtbl.write_vfunc(0xAD, PlayerUpdate::thunk);
 		REL::Relocation<std::uintptr_t> characterVtbl{ RE::VTABLE_Character[0] };
 		HealthDamage::func = characterVtbl.write_vfunc(0x104, HealthDamage::thunk);
+		Driver::Install();
 		REL::Relocation<std::uintptr_t> meleeVtbl{ RE::VTABLE_CombatInventoryItemMelee[0] };
 		ItemScore<1>::func = meleeVtbl.write_vfunc(0x0C, ItemScore<1>::thunk);
 		ItemShouldEquip<1>::func = meleeVtbl.write_vfunc(0x0F, ItemShouldEquip<1>::thunk);
@@ -1422,7 +1400,8 @@ namespace Followers
 		g_reflex.clear();
 		g_enemyAttack.clear();
 		g_enemyStagger.clear();
-		g_zig.clear();  // charges in progress are simply dropped
+		g_nextCharge.clear();
+		Driver::StopAll();
 		g_stats = {};
 		g_pendingCheck.clear();
 		{
@@ -1444,6 +1423,7 @@ namespace Followers
 	{
 		g_time += a_delta;
 		g_logicTimer += a_delta;
+		Driver::Frame(a_delta);
 		UpdateReflexes();
 		if (g_logicTimer < kLogicInterval) return;
 		g_logicTimer = 0.0f;
