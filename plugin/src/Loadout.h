@@ -12,10 +12,16 @@ namespace Loadout
 		RE::SpellItem*     spell = nullptr;     // best aimed attack spell known
 		float              meleeSkill = 0.0f;
 		float              rangedSkill = 0.0f;
+		float              meleeScore = 0.0f;   // weapon damage scaled by skill
+		float              rangedScore = 0.0f;
 
 		[[nodiscard]] bool HasRanged() const { return bow || spell; }
 		[[nodiscard]] bool HasMelee() const { return melee != nullptr; }
-		[[nodiscard]] bool PrefersRanged() const { return HasRanged() && (!HasMelee() || rangedSkill >= meleeSkill); }
+		// a_rangedBias > 1 favours ranged (close combat distance), < 1 favours melee (far).
+		[[nodiscard]] bool PrefersRanged(float a_rangedBias = 1.0f) const
+		{
+			return HasRanged() && (!HasMelee() || rangedScore * a_rangedBias > meleeScore * 1.1f);
+		}
 	};
 
 	Options Read(RE::Actor* a_actor);

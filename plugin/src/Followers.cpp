@@ -48,6 +48,10 @@ namespace Followers
 			Loadout::Options loadout;
 			float loadoutTime = -100.0f;
 			float lastSwap = -100.0f;
+			bool  swappedToRanged = false;
+			int   overrides = 0;              // times the combat AI undid our weapon choice
+			float respectAIUntil = 0.0f;
+			float unreachableUntil = 0.0f;    // melee could not reach its target recently
 			float prevTargetDist = -1.0f;
 			float targetDistTime = -100.0f;
 			bool  closing = false;
@@ -261,9 +265,9 @@ namespace Followers
 				auto next = Loadout::Read(a);
 				if (s.loadoutTime < 0.0f || next.melee != s.loadout.melee || next.bow != s.loadout.bow ||
 					next.spell != s.loadout.spell || next.ammo != s.loadout.ammo) {
-					logger::info("{} loadout: melee {} ({:.0f}), ranged {} ({:.0f}), ammo {}{}", Name(a),
-						next.melee ? next.melee->GetName() : "-", next.meleeSkill,
-						next.bow ? next.bow->GetName() : (next.spell ? next.spell->GetName() : "-"), next.rangedSkill,
+					logger::info("{} loadout: melee {} (skill {:.0f}, score {:.0f}), ranged {} (skill {:.0f}, score {:.0f}), ammo {}{}", Name(a),
+						next.melee ? next.melee->GetName() : "-", next.meleeSkill, next.meleeScore,
+						next.bow ? next.bow->GetName() : (next.spell ? next.spell->GetName() : "-"), next.rangedSkill, next.rangedScore,
 						next.ammo ? next.ammo->GetName() : "-",
 						next.unusableBow ? std::format(", {} has no ammo", next.unusableBow->GetName()) : std::string{});
 				}
@@ -277,9 +281,22 @@ namespace Followers
 		{
 			if (g_time - s.lastSwap < 2.5f || Loadout::IsDrawingBow(a)) return;
 			auto& options = GetLoadout(a, s);
+			if (g_time < s.respectAIUntil) return;
+			// the combat AI swapped back soon after our last change: count it, and give up for a while
+			if (g_time - s.lastSwap < 6.0f && a_ranged == s.swappedToRanged) {
+				if (++s.overrides >= 2) {
+					s.respectAIUntil = g_time + 20.0f;
+					s.overrides = 0;
+					Debug(std::format("{} keeps their own weapon choice for now", Name(a)));
+					return;
+				}
+			} else if (g_time - s.lastSwap >= 6.0f) {
+				s.overrides = 0;
+			}
 			bool  done = a_ranged ? Loadout::EquipRanged(a, options) : Loadout::EquipMelee(a, options);
 			if (done) {
 				s.lastSwap = g_time;
+				s.swappedToRanged = a_ranged;
 				Debug(std::format("{} switches to {} ({})", Name(a), a_ranged ? "ranged" : "melee", a_why));
 			}
 		}
@@ -599,18 +616,24 @@ namespace Followers
 				if (!ranged) Swap(f, s, true, "covering the retreat");
 				return;
 			}
-			if (options.PrefersRanged()) {
+			auto& cfg = Settings::Get();
+			float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
+			if (options.PrefersRanged(bias)) {
+				// archer/mage: keep shooting, melee only when an enemy is in their face
 				if (ranged && d < 300.0f) {
 					Swap(f, s, false, "enemy in their face");
 				} else if (!ranged && d > 600.0f) {
 					Swap(f, s, true, "back to range");
 				}
 			} else {
-				// melee is their strength: shoot while enemies are far, switch once they are about to arrive
-				if (ranged && (d < 700.0f || (s.closing && d < 1100.0f))) {
-					Swap(f, s, false, s.closing ? "enemy charging" : "close enough to charge");
-				} else if (!ranged && d > 1100.0f && !s.closing) {
-					Swap(f, s, true, "enemy far away");
+				// fighter: charge. Shoot only at what they can't reach, or what is too far from the player to chase.
+				auto  player = RE::PlayerCharacter::GetSingleton();
+				float leash = kTuning[std::clamp(cfg.combatDistance, 0, 2)].combatLeash;
+				bool  cantChase = (cfg.combatLeash && Dist(a_target, player) > leash) || g_time < s.unreachableUntil;
+				if (ranged && !cantChase) {
+					Swap(f, s, false, "charging");
+				} else if (!ranged && cantChase && d > 600.0f) {
+					Swap(f, s, true, "can't reach, shooting");
 				}
 			}
 		}
@@ -778,6 +801,7 @@ namespace Followers
 			}
 			if (s.stuckSince >= 0.0f && g_time - s.stuckSince >= 3.0f && g_time - s.lastRepath > 6.0f) {
 				s.lastRepath = g_time;
+				s.unreachableUntil = g_time + 8.0f;
 				s.stuckSince = -1.0f;
 				if (attacker && Alive(attacker) && attacker != target && g_time - s.lastAttackedTime < 4.0f) {
 					StartCombat(f, s, attacker, "can't reach target, fighting attacker");

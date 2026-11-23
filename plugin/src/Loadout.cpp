@@ -102,6 +102,11 @@ namespace Loadout
 		out.rangedSkill = std::max(bowSkill, spellSkill);
 		if (out.bow && out.spell && spellSkill > bowSkill) out.bow = nullptr;  // use the better of the two
 		if (out.bow && out.spell) out.spell = nullptr;
+
+		auto scale = [](float a_skill) { return 0.5f + a_skill / 100.0f; };
+		if (out.melee) out.meleeScore = out.melee->GetAttackDamage() * scale(out.meleeSkill);
+		if (out.bow) out.rangedScore = (out.bow->GetAttackDamage() + (out.ammo ? out.ammo->data.damage : 0.0f)) * scale(out.rangedSkill);
+		if (out.spell) out.rangedScore = SpellPower(out.spell) * scale(out.rangedSkill);
 		return out;
 	}
 

@@ -28,9 +28,11 @@ Work in progress.
   distance step further from you for a few seconds.
 
 **Weapons**
-- Followers who carry both ranged and melee weapons pick by skill and distance: a sword fighter
-  shoots while enemies are far and switches to the sword as they arrive; an archer switches to
-  melee only when an enemy is in their face.
+- Followers who carry both ranged and melee weapons compare them (damage and skill): fighters
+  charge, and shoot only at enemies they can't reach or that are too far from you to chase;
+  archers and mages keep shooting and switch to melee only when an enemy is in their face.
+- If the game's own combat AI keeps undoing the choice, the follower is left alone for a while
+  instead of swapping back and forth.
 - Out of combat, followers draw their ranged weapon when you draw yours.
 
 **Smarter targeting**
