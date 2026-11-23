@@ -496,6 +496,7 @@ namespace Followers
 		RE::TESObjectCELL* g_lingerCell = nullptr;
 		float        g_menuSince = -1.0f;
 		float        g_lingerSeconds = 0.0f;
+		int          g_lastSafe = -1;
 
 		float PlayerLingering(RE::PlayerCharacter* a_player)
 		{
@@ -1239,7 +1240,13 @@ namespace Followers
 				bool drawn = player->AsActorState()->IsWeaponDrawn();
 				bool relax = cfg.sandbox && safe && !drawn && mode != 0 && !inCombat && !player->IsInCombat() &&
 				             g_lingerSeconds >= 15.0f && sameSpace;
-				if (relax && !s.sandboxing && !Driver::IsDriving(f) && f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kWaitingForPlayer) <= 0.0f) {
+				if (safe != g_lastSafe) {
+					g_lastSafe = safe;
+					auto loc = player->GetCurrentLocation();
+					logger::info("safe place: {} ({})", safe ? "yes" : "no", loc ? loc->GetName() : "no location");
+				}
+				if (relax && !s.sandboxing && f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kWaitingForPlayer) <= 0.0f) {
+					if (s.formationDrive) Driver::Stop(f);
 					SetMod(f, s, RE::ActorValue::kWaitingForPlayer, 1.0f);
 					s.sandboxing = true;
 					f->EvaluatePackage(true, false);
@@ -1348,18 +1355,19 @@ namespace Followers
 			}
 			// Stuck while following (not driven, the player away, barely moving): try a hop.
 			if (formation && !Driver::IsDriving(f) && dist > 250.0f) {
-				if (g_time - s.followSampleTime >= 0.5f) {
+				if (g_time - s.followSampleTime >= (s.looseness <= 1.01f ? 0.25f : 0.5f)) {
 					float moved = f->GetPosition().GetDistance(s.followSample);
 					s.followSample = f->GetPosition();
 					s.followSampleTime = g_time;
-					if (moved < 30.0f) {
+					if (moved < (s.looseness <= 1.01f ? 15.0f : 30.0f)) {
 						if (s.stallSince < 0.0f) s.stallSince = g_time;
 					} else {
 						s.stallSince = -1.0f;
 						s.hopFails = 0;
 					}
 				}
-				if (s.stallSince >= 0.0f && g_time - s.stallSince >= 1.0f) TryHop(f, s, player);
+				float stallLimit = s.looseness <= 1.01f ? 0.5f : 1.0f;  // weapons drawn: decide quicker
+				if (s.stallSince >= 0.0f && g_time - s.stallSince >= stallLimit) TryHop(f, s, player);
 			} else if (!Driver::IsDriving(f)) {
 				s.stallSince = -1.0f;
 			}

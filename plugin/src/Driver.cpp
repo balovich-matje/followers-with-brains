@@ -196,6 +196,8 @@ namespace Driver
 			float       lastSpeed = 0.0f;
 			bool        hopStarted = false;
 			float       zoneHeading = 0.0f;
+			bool        wasInZone = false;
+			float       stillFor = 0.0f;
 			bool        zoneHeadingSet = false;
 			bool        hopFalling = false;
 			RE::NiPoint3 hopFrom;
@@ -464,7 +466,12 @@ namespace Driver
 					float angle, range;
 					ToPolar(a, target, angle, range, zh);
 					float centre = ZoneCentre(d.order, angle);
-					bool  inZone = std::fabs(AngleDiff(angle, centre)) <= zHalf && range >= zNear && range <= zFar;
+					// with a margin, so the edge of the area isn't a flicker between relaxing and catching up
+					float margin = d.wasInZone ? 45.0f : 0.0f;
+					float angleMargin = range > 1.0f ? margin / range / kDeg : 0.0f;
+					bool  inZone = std::fabs(AngleDiff(angle, centre)) <= zHalf + angleMargin && range >= zNear - margin &&
+					              range <= zFar + margin;
+					d.wasInZone = inZone;
 					if (range > 1500.0f) return "too far";
 
 					// a personal spot inside the area, picked again every few seconds: a little wandering
@@ -477,10 +484,19 @@ namespace Driver
 					}
 					RE::NiPoint3 aim;
 					float        gain;
-					if (inZone) {
+					bool targetStill = tSpeed < 40.0f;
+					if (inZone && targetStill) {
+						// the player stands (or only turns): stay where she is
+						aim = pos;
+						gain = 0.0f;
+						d.stillFor += a_delta;
+						if (d.stillFor > 1.0f && d.lastSpeed < 40.0f) return "in place";
+					} else if (inZone) {
+						d.stillFor = 0.0f;
 						aim = Polar(target, d.pickAngle, d.pickRange, zh);  // drift toward the personal spot
 						gain = 0.5f / loose;
 					} else {
+						d.stillFor = 0.0f;
 						// nearest point of the area
 						float ca = centre + std::clamp(AngleDiff(angle, centre), -zHalf, zHalf);
 						float cr = std::clamp(range, zNear, zFar);
@@ -490,7 +506,7 @@ namespace Driver
 					RE::NiPoint3 toAim = aim - pos;
 					toAim.z = 0.0f;
 					float gap = toAim.Length();
-					if (inZone && tSpeed < 30.0f && gap < 80.0f && d.lastSpeed < 30.0f) return "in place";
+
 
 					// velocity: go along with the target (fully when it runs forward, partly when it strafes or
 					// backpedals, less in calm situations), plus a pull toward the aim point
@@ -499,13 +515,15 @@ namespace Driver
 					RE::NiPoint3 want = tv * mirror + (gap > 1.0f ? toAim / gap : RE::NiPoint3{}) * std::min(gap * gain, 400.0f);
 					want.z = 0.0f;
 					bool  sprinting = target->AsActorState()->IsSprinting();
-					float top = (sprinting ? d.order.sprintSpeed : d.order.speed) * 1.05f;
+					// weapons drawn (looseness 1): eager, a higher top speed when behind and a quick speed-up
+					bool  eager = loose <= 1.01f;
+					float top = (sprinting ? d.order.sprintSpeed : d.order.speed) * (eager && !inZone ? 1.25f : 1.05f);
 					float wantSpeed = std::min(want.Length(), top);
 					// smooth: speed up and slow down at a person's rate, no instant matching
-					float accel = 700.0f * std::min(a_delta, 0.05f);
+					float accel = (eager ? 1400.0f : 700.0f) * std::min(a_delta, 0.05f);
 					float current = d.lastSpeed;
 					float speedNow = std::clamp(wantSpeed, current - accel * 1.5f, current + accel);
-					if (wantSpeed < 15.0f && current < 40.0f) speedNow = 0.0f;
+					if (wantSpeed < 35.0f && current < 60.0f) speedNow = 0.0f;  // no slow shuffling in place
 					d.lastSpeed = speedNow;
 					d.speedNow = speedNow;
 					move = want.Length() > 1.0f ? want / want.Length() : Polar(target, 0.0f, 1.0f, zh) - targetPos;
