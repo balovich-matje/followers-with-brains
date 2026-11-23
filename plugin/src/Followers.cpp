@@ -932,12 +932,12 @@ namespace Followers
 			order.kind = Driver::Kind::kCharge;
 			order.target = a_target->GetHandle();
 			order.speed = Tuning::Get().chargeSpeed;  // a player's run (measured); sprint waits for a working sprint animation
-			order.weave = Tuning::Get().weave;
+			order.weave = 0.0f;  // zig-zag shelved until the run looks right
 			order.flipMin = Tuning::Get().flipMin;
 			order.flipMax = Tuning::Get().flipMax;
 			order.stopDistance = kChargeStop;
 			order.duration = 10.0f;
-			order.sprint = false;
+			order.sprint = true;
 			if (!Driver::Start(f, order)) return false;
 			g_nextCharge[f->GetFormID()] = g_time + 4.0f;
 			++g_stats.zigzags;
@@ -953,6 +953,16 @@ namespace Followers
 				return a_estimate > 0.0f ? measured * 0.75f + a_estimate * 0.25f : measured;
 			}
 			return a_estimate;
+		}
+
+		float NearestEnemyDist(RE::Actor* f)
+		{
+			float best = std::numeric_limits<float>::max();
+			for (auto& h : g_lastEnemies) {
+				auto e = Get(h);
+				if (Alive(e)) best = std::min(best, Dist(f, e));
+			}
+			return best;
 		}
 
 		void UpdateWeapons(RE::Actor* f, FollowerState& s, RE::Actor* a_target, bool a_retreating)
@@ -993,7 +1003,8 @@ namespace Followers
 				bool  cantChase = (cfg.combatLeash && Dist(a_target, player) > leash) || g_time < s.unreachableUntil;
 				// Close/Medium: trade a few shots with a far shooter before charging
 				if (cfg.combatDistance != 2 && IsRanged(a_target) && d > kSprintReach) cantChase = true;
-				if (!cantChase || d < 600.0f) {
+				// never pull a bow with an enemy this close, whatever else is going on
+				if (!cantChase || d < 600.0f || NearestEnemyDist(f) < 600.0f) {
 					SetWeaponPref(f, 1);
 					if (ranged) Swap(f, s, false, "charging");
 				} else {

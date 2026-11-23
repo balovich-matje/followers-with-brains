@@ -134,6 +134,46 @@ namespace Driver
 			}
 		};
 
+		// While a body is driven, the AI's own graph events that would undo the drive are refused:
+		// "stop moving" (legs back to idle under a moving body) and attack/block starts.
+		thread_local bool g_ownEvent = false;
+
+		bool RefusedWhileDriven(const char* a_event)
+		{
+			if (!a_event) return false;
+			std::string_view e{ a_event };
+			auto starts = [&](std::string_view p) {
+				return e.size() >= p.size() && std::equal(p.begin(), p.end(), e.begin(), [](char a, char b) {
+					return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+				});
+			};
+			return starts("moveStop") || starts("attackStart") || starts("attackPowerStart") || starts("bowAttackStart") ||
+			       starts("blockStart") || starts("bashStart") || starts("turnStop") || starts("SprintStop");
+		}
+
+		struct GraphHook
+		{
+			using Fn = bool (*)(RE::IAnimationGraphManagerHolder*, const RE::BSFixedString&);
+			static inline Fn original{ nullptr };
+
+			static bool Thunk(RE::IAnimationGraphManagerHolder* a_this, const RE::BSFixedString& a_event)
+			{
+				if (a_this && !g_ownEvent) {
+					auto actor = static_cast<RE::Character*>(a_this);
+					if (IsDrivenId(actor->GetFormID()) && RefusedWhileDriven(a_event.c_str())) return false;
+				}
+				return original(a_this, a_event);
+			}
+		};
+
+		bool Send(RE::Actor* a_actor, std::string_view a_event)
+		{
+			g_ownEvent = true;
+			bool took = a_actor->NotifyAnimationGraph(a_event);
+			g_ownEvent = false;
+			return took;
+		}
+
 		// ------------------------------------------------------------------ drives
 		struct Drive
 		{
@@ -143,6 +183,8 @@ namespace Driver
 			int         side = 1;
 			bool        moveSent = false;
 			bool        sprinting = false;
+			bool        holding = false;
+			RE::NiPoint3 holdAt;
 		};
 		std::unordered_map<RE::FormID, Drive>        g_drives;
 		std::unordered_map<RE::FormID, std::string>  g_lastEnd;
@@ -205,7 +247,7 @@ namespace Driver
 			if (a_drive.sprinting) {
 				a_actor->AsActorState()->actorState1.sprinting = 0;
 				a_actor->SetGraphVariableBool("IsSprinting", false);
-				a_actor->NotifyAnimationGraph("SprintStop"sv);
+				Send(a_actor, "SprintStop"sv);
 			}
 			ReleaseSlot(reinterpret_cast<std::uintptr_t>(a_actor));
 			SetDriven(id, false);
@@ -269,7 +311,13 @@ namespace Driver
 					if (d.order.holdWhileAttacked && !attacking && d.elapsed > 0.2f) return "swing over";
 					if (dist >= d.order.stopDistance) {
 						if (!d.order.holdWhileAttacked) return "clear";
-						// out of reach: wait there, facing the attacker, until its swing is over
+						// out of reach: hold this spot, facing the attacker, until its swing is over
+						if (!d.holding) {
+							d.holding = true;
+							d.holdAt = pos;
+						}
+						a->SetPosition(d.holdAt, true);
+						if (auto controller = a->GetCharController()) controller->SetLinearVelocityImpl(RE::hkVector4(0.0f, 0.0f, 0.0f, 0.0f));
 						a->SetRotationZ(TurnToward(a->GetAngleZ(), Heading(toDir), 8.0f * std::min(a_delta, 0.05f)));
 						if (auto slot = ClaimSlot(reinterpret_cast<std::uintptr_t>(a))) {
 							slot->speed.store(0.0f, std::memory_order_relaxed);
@@ -329,17 +377,20 @@ namespace Driver
 				slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			}
 			if (!d.moveSent) {
-				a->NotifyAnimationGraph("moveStart"sv);
+				bool took = Send(a, "moveStart"sv);
 				d.moveSent = true;
+				if (!took) logger::info("{}: moveStart refused by the graph", a->GetDisplayFullName());
 			}
 			if (d.order.sprint && !d.sprinting) {
 				state->actorState1.sprinting = 1;
 				bool flag = a->SetGraphVariableBool("IsSprinting", true);
-				bool took = a->NotifyAnimationGraph("SprintStart"sv);
+				bool took = Send(a, "SprintStart"sv);
+				bool readBack = false;
+				a->GetGraphVariableBool("IsSprinting", readBack);
 				d.sprinting = true;
-				logger::info("{}: sprint flag {} event {}", a->GetDisplayFullName(), flag ? "set" : "missing", took ? "taken" : "refused");
+				logger::info("{}: sprint: IsSprinting variable {}, read back {}, SprintStart event {}", a->GetDisplayFullName(),
+					flag ? "set" : "not in this graph", readBack, took ? "taken" : "refused");
 			}
-			if (d.sprinting) a->SetGraphVariableBool("IsSprinting", true);
 			return nullptr;
 		}
 	}
@@ -353,6 +404,8 @@ namespace Driver
 			reinterpret_cast<ChannelHook<Channel::kDirection>::Fn>(direction.write_vfunc(1, ChannelHook<Channel::kDirection>::Thunk));
 		REL::Relocation<std::uintptr_t> turn{ RE::VTABLE_BSTAnimationGraphDataChannel_Actor_float_ActorTurnDeltaChannel_[0] };
 		ChannelHook<Channel::kTurn>::original = reinterpret_cast<ChannelHook<Channel::kTurn>::Fn>(turn.write_vfunc(1, ChannelHook<Channel::kTurn>::Thunk));
+		REL::Relocation<std::uintptr_t> graph{ RE::VTABLE_Character[3] };
+		GraphHook::original = reinterpret_cast<GraphHook::Fn>(graph.write_vfunc(1, GraphHook::Thunk));
 		REL::Relocation<std::uintptr_t> action{ RE::VTABLE_TESActionData[0] };
 		ActionHook::original = reinterpret_cast<ActionHook::Fn>(action.write_vfunc(5, ActionHook::Thunk));
 		logger::info("Movement driver installed");
