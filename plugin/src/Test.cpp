@@ -179,6 +179,11 @@ namespace Test
 			// keep the player alive (the test save is never saved, so this is temporary); the follower is left as is
 			player->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, 100000.0f);
 			player->AsActorValueOwner()->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, 100000.0f);
+			// a sneaking player makes the follower sneak too, and sneakers can only walk
+			if (player->AsActorState()->IsSneaking()) {
+				player->AsActorState()->actorState1.sneaking = 0;
+				player->NotifyAnimationGraph("SneakStop"sv);
+			}
 			// kill animations would end a fight before anything happens
 			if (auto killMove = RE::TESForm::LookupByEditorID<RE::TESGlobal>("KillMove")) killMove->value = 0.0f;
 			g_spawned.clear();

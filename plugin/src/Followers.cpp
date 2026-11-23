@@ -377,9 +377,19 @@ namespace Followers
 			s.offsetSlot = a_slot;
 		}
 
+		// A sneaking actor can only walk: stand up to fight (a player stops sneaking once a fight is on).
+		void StandUp(RE::Actor* a)
+		{
+			auto state = a->AsActorState();
+			if (!state->IsSneaking()) return;
+			state->actorState1.sneaking = 0;
+			a->NotifyAnimationGraph("SneakStop"sv);
+		}
+
 		void StartCombat(RE::Actor* a, FollowerState& s, RE::Actor* a_target, std::string_view a_why)
 		{
 			if (!Alive(a_target) || CombatTarget(a) == a_target) return;
+			StandUp(a);
 			ClearOffset(a, s);
 			s.lastRetarget = g_time;
 			s.engagingUntil = g_time + 2.0f;
@@ -1128,6 +1138,7 @@ namespace Followers
 
 			// ---- ranged or melee
 			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
+			if (Dist(f, target) > 300.0f) StandUp(f);
 
 			// ---- summons: go for the summoner when it can be reached
 			if (cfg.focusSummoners && target->IsCommandedActor() && g_time - s.lastRetarget > 1.0f) {
