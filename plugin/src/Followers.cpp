@@ -55,6 +55,7 @@ namespace Followers
 			float stallSince = -1.0f;
 			RE::NiPoint3 followSample;
 			float followSampleTime = -100.0f;
+			float nextTrail = 0.0f;
 			bool  sandboxing = false;
 			float looseness = 1.0f;
 			float otherSpaceSince = -1.0f;
@@ -409,6 +410,86 @@ namespace Followers
 			default:  // behind
 				return { a_slot == 0 ? 0.0f : sign * t.side * n, -(t.back + 50.0f * n) };
 			}
+		}
+
+		// ------------------------------------------------------------------ the player's trail
+		// The route the player walked (a point every ~60 units, in this area). A follower that can't
+		// find its own way (an enemy up a tower whose stairs the pathfinder misses) runs it instead.
+		std::deque<RE::NiPoint3> g_trail;
+		RE::TESObjectCELL*       g_trailCell = nullptr;
+		RE::TESWorldSpace*       g_trailWorld = nullptr;
+
+		void RecordTrail(RE::PlayerCharacter* a_player)
+		{
+			auto cell = a_player->GetParentCell();
+			auto world = a_player->GetWorldspace();
+			bool sameArea = world ? world == g_trailWorld : cell == g_trailCell;
+			if (!sameArea) {
+				g_trail.clear();
+				g_trailCell = cell;
+				g_trailWorld = world;
+			}
+			auto pos = a_player->GetPosition();
+			if (g_trail.empty() || pos.GetDistance(g_trail.back()) >= 60.0f) {
+				if (a_player->IsOnMount() || a_player->AsActorState()->IsSwimming()) return;
+				g_trail.push_back(pos);
+				if (g_trail.size() > 400) g_trail.pop_front();
+			}
+		}
+
+		// Trail points from near the follower to near a_goal (or to the trail's end). Empty if the
+		// trail doesn't pass close to both.
+		std::vector<RE::NiPoint3> TrailRoute(RE::Actor* f, const RE::NiPoint3* a_goal)
+		{
+			std::vector<RE::NiPoint3> out;
+			if (g_trail.size() < 3) return out;
+			auto        fp = f->GetPosition();
+			std::size_t start = g_trail.size();
+			float       best = 350.0f;
+			for (std::size_t i = 0; i < g_trail.size(); ++i) {
+				float d = fp.GetDistance(g_trail[i]);
+				if (d < best && std::fabs(g_trail[i].z - fp.z) < 120.0f && Driver::ClearLine(f, fp, g_trail[i])) {
+					best = d;
+					start = i;
+				}
+			}
+			if (start >= g_trail.size()) return out;
+			std::size_t end = g_trail.size() - 1;
+			if (a_goal) {
+				float bestGoal = 450.0f;
+				std::size_t found = g_trail.size();
+				for (std::size_t i = start; i < g_trail.size(); ++i) {
+					float d = a_goal->GetDistance(g_trail[i]);
+					if (d < bestGoal) {
+						bestGoal = d;
+						found = i;
+					}
+				}
+				if (found >= g_trail.size()) return out;
+				end = found;
+			}
+			if (end <= start + 1) return out;
+			for (std::size_t i = start; i <= end; ++i) out.push_back(g_trail[i]);
+			return out;
+		}
+
+		bool RunTrail(RE::Actor* f, FollowerState& s, RE::PlayerCharacter* a_player, RE::Actor* a_goal, std::string_view a_why)
+		{
+			if (g_time < s.nextTrail || Driver::IsDriving(f)) return false;
+			s.nextTrail = g_time + 4.0f;
+			RE::NiPoint3 goal;
+			if (a_goal) goal = a_goal->GetPosition();
+			auto route = TrailRoute(f, a_goal ? &goal : nullptr);
+			if (route.empty()) return false;
+			Driver::Order order;
+			order.kind = Driver::Kind::kPath;
+			order.target = a_player->GetHandle();
+			order.path = std::move(route);
+			order.speed = Tuning::Get().chargeSpeed;
+			order.duration = 20.0f;
+			if (!Driver::Start(f, order)) return false;
+			Debug(std::format("{} takes your route ({})", Name(f), a_why));
+			return true;
 		}
 
 		// A follower stuck below a rock the player is on, above a drop the player went down, or at a fence:
@@ -1417,7 +1498,10 @@ namespace Followers
 					}
 				}
 				float stallLimit = s.looseness <= 1.01f ? 0.5f : 1.0f;  // weapons drawn: decide quicker
-				if (s.stallSince >= 0.0f && g_time - s.stallSince >= stallLimit) TryHop(f, s, player);
+				if (s.stallSince >= 0.0f && g_time - s.stallSince >= stallLimit && !TryHop(f, s, player) &&
+					g_time - s.stallSince >= stallLimit + 1.5f) {
+					RunTrail(f, s, player, nullptr, "to you");
+				}
 			} else if (!Driver::IsDriving(f)) {
 				s.stallSince = -1.0f;
 			}
@@ -1569,6 +1653,12 @@ namespace Followers
 					s.bestTargetTime = g_time;
 					Debug(std::format("{} can't reach {}", Name(f), Name(target)));
 				}
+				// the pathfinder can't get there: take the player's route, if it passes near the target
+				if (g_time < s.unreachableUntil && !Driver::IsDriving(f) && RunTrail(f, s, player, target, "to the enemy")) {
+					s.unreachableUntil = 0.0f;
+					s.bestTargetTime = g_time;
+					return;
+				}
 			}
 			if (MaybeCharge(f, s, target)) return;
 			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
@@ -1672,6 +1762,7 @@ namespace Followers
 			UpdateRetreat(scan);
 
 			g_lingerSeconds = PlayerLingering(a_player);
+			RecordTrail(a_player);
 			int slot = 0;
 			for (auto f : scan.followers) {
 				UpdateFollower(f, slot++, scan);

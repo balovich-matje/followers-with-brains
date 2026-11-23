@@ -14,7 +14,8 @@ namespace Driver
 		kStepBack,  // back away from the target, facing it
 		kRunTo,     // run toward the target (e.g. the player), facing the way it runs
 		kFormation,  // hold an area next to the target (the player) while it moves
-		kHop         // jump to the landing point (up a rock, down a ledge, over a fence)
+		kHop,        // jump to the landing point (up a rock, down a ledge, over a fence)
+		kPath        // run along a list of points (e.g. the route the player walked)
 	};
 
 	struct Order
@@ -38,6 +39,7 @@ namespace Driver
 		float           sprintSpeed = 715.0f;  // formation: top speed while the target sprints
 		RE::NiPoint3    landing;               // hop: where to land
 		float           looseness = 1.0f;      // formation: 1 tight; larger = bigger area, softer pull
+		std::vector<RE::NiPoint3> path;        // path: the points to run through, in order
 	};
 
 	bool Install();  // animation channel and action hooks (kDataLoaded)

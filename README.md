@@ -21,6 +21,8 @@ Work in progress.
   backpedalling doesn't send them running round you.
 - In safe places, when you stay put for a while or are busy talking or crafting, followers relax:
   they wander off to sit, lean and use furniture, and come back when you move on.
+- When the game's pathfinding can't get a follower to you or to an enemy (an archer up a tower,
+  a ledge above), they take the route you walked: up the same stairs, through the same gaps.
 - Followers that fall behind get a short speed boost. If they are still far away and out of
   sight, they are moved behind you.
 

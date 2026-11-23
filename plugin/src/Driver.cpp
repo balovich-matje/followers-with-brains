@@ -195,6 +195,7 @@ namespace Driver
 			float       pickRange = 200.0f;
 			float       lastSpeed = 0.0f;
 			bool        hopStarted = false;
+			std::size_t pathIndex = 0;
 			float       zoneHeading = 0.0f;
 			bool        wasInZone = false;
 			float       stillFor = 0.0f;
@@ -358,6 +359,59 @@ namespace Driver
 			return nullptr;
 		}
 
+		// Run through the order's points in turn (they lie on walkable ground: a route someone walked).
+		const char* PathStep(RE::Actor* a, Drive& d, RE::bhkCharacterController* a_controller, RE::bhkWorld* a_world, float a_delta)
+		{
+			float dt = std::min(a_delta, 0.05f);
+			d.elapsed += dt;
+			if (d.elapsed > d.order.duration) return "time";
+			auto pos = a->GetPosition();
+			// skip points already reached (or passed)
+			while (d.pathIndex < d.order.path.size()) {
+				RE::NiPoint3 to = d.order.path[d.pathIndex] - pos;
+				to.z = 0.0f;
+				if (to.Length() > 45.0f) break;
+				++d.pathIndex;
+			}
+			if (d.pathIndex >= d.order.path.size()) return "arrived";
+			auto&        goal = d.order.path[d.pathIndex];
+			RE::NiPoint3 to = goal - pos;
+			to.z = 0.0f;
+			float        len = to.Length();
+			RE::NiPoint3 move = to / len;
+			float        step = d.order.speed * dt;
+			RE::NiPoint3 next = pos + move * std::min(step, len);
+			// walls in the way: give up (the route came from someone walking it, so this is rare)
+			RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f };
+			auto         ahead = Cast(a, a_world, pos + chest, pos + chest + move * (step + 30.0f));
+			if (ahead.hit && ahead.ref != a && !(ahead.ref && ahead.ref->Is(RE::FormType::ActorCharacter))) return "blocked";
+			// stay on the ground, following the route's height (stairs, slopes)
+			float top = std::max(pos.z, goal.z) + 70.0f;
+			auto  ground = Cast(a, a_world, RE::NiPoint3{ next.x, next.y, top }, RE::NiPoint3{ next.x, next.y, std::min(pos.z, goal.z) - 120.0f });
+			if (!ground.hit) return "edge";
+			next.z = ground.point.z;
+			float heading = TurnToward(a->GetAngleZ(), Heading(move), 8.0f * dt);
+			a->SetPosition(next, true);
+			a->SetRotationZ(heading);
+			float scale = RE::bhkWorld::GetWorldScale();
+			RE::NiPoint3 velocity = move * d.order.speed;
+			a_controller->context.currentState = RE::hkpCharacterStateType::kOnGround;
+			a_controller->SetLinearVelocityImpl(RE::hkVector4(velocity.x * scale, velocity.y * scale, 0.0f, 0.0f));
+			a_controller->fallStartHeight = next.z;
+			a_controller->fallTime = 0.0f;
+			if (auto slot = ClaimSlot(reinterpret_cast<std::uintptr_t>(a))) {
+				slot->speed.store(d.order.speed, std::memory_order_relaxed);
+				slot->direction.store(0.0f, std::memory_order_relaxed);
+				slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			}
+			if (!d.moveSent || d.elapsed - d.lastMoveKick > 1.0f) {
+				Send(a, "moveStart"sv);
+				d.moveSent = true;
+				d.lastMoveKick = d.elapsed;
+			}
+			return nullptr;
+		}
+
 		// One frame of one drive. Returns why it ends, or nullptr to go on.
 		const char* Step(RE::Actor* a, Drive& d, float a_delta)
 		{
@@ -372,6 +426,7 @@ namespace Driver
 			if (!controller || !world) return "no physics";
 
 			if (d.order.kind == Kind::kHop) return Hop(a, d, controller, a_delta);
+			if (d.order.kind == Kind::kPath) return PathStep(a, d, controller, world, a_delta);
 
 			auto targetPtr = d.order.target.get();
 			auto target = targetPtr.get();
