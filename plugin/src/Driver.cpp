@@ -183,8 +183,11 @@ namespace Driver
 			int         side = 1;
 			bool        moveSent = false;
 			bool        sprinting = false;
-			bool        holding = false;
-			RE::NiPoint3 holdAt;
+			float       lastSprintKick = 0.0f;
+			int         sprintKicks = 0;
+			bool        hasLastTarget = false;
+			RE::NiPoint3 lastTargetPos;
+			float       speedNow = -1.0f;  // step back: this frame's speed (gap keeping)
 		};
 		std::unordered_map<RE::FormID, Drive>        g_drives;
 		std::unordered_map<RE::FormID, std::string>  g_lastEnd;
@@ -252,7 +255,8 @@ namespace Driver
 			ReleaseSlot(reinterpret_cast<std::uintptr_t>(a_actor));
 			SetDriven(id, false);
 			g_lastEnd[id] = std::string{ a_why };
-			logger::info("{}: drive ended ({}, {:.1f}s)", a_actor->GetDisplayFullName(), a_why, a_drive.elapsed);
+			logger::info("{}: drive ended ({}, {:.1f}s{})", a_actor->GetDisplayFullName(), a_why, a_drive.elapsed,
+				a_drive.sprintKicks ? std::format(", sprint restarted {}x", a_drive.sprintKicks) : std::string{});
 		}
 
 		// One frame of one drive. Returns why it ends, or nullptr to go on.
@@ -309,23 +313,20 @@ namespace Driver
 					bool attacking = swing == RE::ATTACK_STATE_ENUM::kDraw || swing == RE::ATTACK_STATE_ENUM::kSwing ||
 					                 swing == RE::ATTACK_STATE_ENUM::kHit;
 					if (d.order.holdWhileAttacked && !attacking && d.elapsed > 0.2f) return "swing over";
-					if (dist >= d.order.stopDistance) {
-						if (!d.order.holdWhileAttacked) return "clear";
-						// out of reach: hold this spot, facing the attacker, until its swing is over
-						if (!d.holding) {
-							d.holding = true;
-							d.holdAt = pos;
-						}
-						a->SetPosition(d.holdAt, true);
-						if (auto controller = a->GetCharController()) controller->SetLinearVelocityImpl(RE::hkVector4(0.0f, 0.0f, 0.0f, 0.0f));
-						a->SetRotationZ(TurnToward(a->GetAngleZ(), Heading(toDir), 8.0f * std::min(a_delta, 0.05f)));
-						if (auto slot = ClaimSlot(reinterpret_cast<std::uintptr_t>(a))) {
-							slot->speed.store(0.0f, std::memory_order_relaxed);
-							slot->direction.store(0.0f, std::memory_order_relaxed);
-							slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
-						}
-						return nullptr;
+					if (dist >= d.order.stopDistance && !d.order.holdWhileAttacked) return "clear";
+					// Keep the gap: back off at the speed the attacker closes in (a little faster when inside
+					// the gap), so waiting out a swing is one continuous backpedal instead of a tug of war.
+					RE::NiPoint3 targetPos = target->GetPosition();
+					float closing = 0.0f;
+					if (d.hasLastTarget && a_delta > 0.0f) {
+						RE::NiPoint3 moved = targetPos - d.lastTargetPos;
+						moved.z = 0.0f;
+						closing = std::max(0.0f, (moved.x * -toDir.x + moved.y * -toDir.y) / a_delta);
 					}
+					d.lastTargetPos = targetPos;
+					d.hasLastTarget = true;
+					float inside = std::max(0.0f, d.order.stopDistance - dist);
+					d.speedNow = std::min(d.order.speed, closing + inside * 4.0f);
 					// diagonal backpedal, as a player does it (measured ~450 units/s)
 					RE::NiPoint3 across{ -toDir.y, toDir.x, 0.0f };
 					RE::NiPoint3 back = toDir * -1.0f + across * (d.order.weave * static_cast<float>(d.side));
@@ -342,7 +343,9 @@ namespace Driver
 
 			float dt = std::min(a_delta, 0.05f);
 			float heading = TurnToward(a->GetAngleZ(), face, 8.0f * dt);
-			float        step = d.order.speed * dt;
+			float        speed = d.speedNow >= 0.0f ? d.speedNow : d.order.speed;
+			d.speedNow = -1.0f;
+			float        step = speed * dt;
 			RE::NiPoint3 next = pos + move * step;
 
 			// walls, rocks and bodies in the way: hand back to the AI (and to traversal mods)
@@ -362,14 +365,14 @@ namespace Driver
 			a->SetPosition(next, true);
 			a->SetRotationZ(heading);
 			float scale = RE::bhkWorld::GetWorldScale();
-			RE::NiPoint3 velocity = move * d.order.speed;
+			RE::NiPoint3 velocity = move * speed;
 			controller->context.currentState = RE::hkpCharacterStateType::kOnGround;
 			controller->SetLinearVelocityImpl(RE::hkVector4(velocity.x * scale, velocity.y * scale, 0.0f, 0.0f));
 			controller->fallStartHeight = next.z;
 			controller->fallTime = 0.0f;
 
 			if (auto slot = ClaimSlot(reinterpret_cast<std::uintptr_t>(a))) {
-				slot->speed.store(d.order.speed, std::memory_order_relaxed);
+				slot->speed.store(speed, std::memory_order_relaxed);
 				// the channel counts in turns, 0..1 (0 = forward, 0.5 = backward), not radians
 				float turns = Wrap(Heading(move) - heading) / 6.2831853f;
 				if (turns < 0.0f) turns += 1.0f;
@@ -390,6 +393,17 @@ namespace Driver
 				d.sprinting = true;
 				logger::info("{}: sprint: IsSprinting variable {}, read back {}, SprintStart event {}", a->GetDisplayFullName(),
 					flag ? "set" : "not in this graph", readBack, took ? "taken" : "refused");
+			} else if (d.sprinting) {
+				// the game clears the sprint state on its own: keep it, and restart the sprint if the graph left it
+				state->actorState1.sprinting = 1;
+				bool still = false;
+				a->GetGraphVariableBool("IsSprinting", still);
+				if (!still && d.elapsed - d.lastSprintKick > 0.3f) {
+					a->SetGraphVariableBool("IsSprinting", true);
+					Send(a, "SprintStart"sv);
+					d.lastSprintKick = d.elapsed;
+					++d.sprintKicks;
+				}
 			}
 			return nullptr;
 		}

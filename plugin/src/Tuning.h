@@ -14,7 +14,7 @@ namespace Tuning
 		float flipMax = 0.6f;
 		// stepping out of a big hit
 		float stepSpeed = 450.0f;     // units/s (a player's diagonal backpedal)
-		float stepDiagonal = 1.0f;    // 1 = diagonal backpedal, 0 = straight back
+		float stepDiagonal = 0.5f;    // sideways share of the backpedal: 1 = 45 degrees, 0.5 = ~27, 0 = straight back
 		float dodgeShare = 0.2f;      // dodge hits above this share of current health (power attacks always)
 		float dodgeChance = 75.0f;    // percent
 		float dodgeCooldown = 2.5f;   // seconds between dodges
