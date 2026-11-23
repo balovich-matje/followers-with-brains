@@ -23,6 +23,8 @@ Work in progress.
   they wander off to sit, lean and use furniture, and come back when you move on.
 - When the game's pathfinding can't get a follower to you or to an enemy (an archer up a tower,
   a ledge above), they take the route you walked: up the same stairs, through the same gaps.
+  If there is no such route yet, a melee follower sticks close to you instead of hiding, until
+  the enemy is near and on their level.
 - Followers that fall behind get a short speed boost. If they are still far away and out of
   sight, they are moved behind you.
 

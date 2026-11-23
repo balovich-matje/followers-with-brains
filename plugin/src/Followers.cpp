@@ -72,6 +72,10 @@ namespace Followers
 			int   overrides = 0;              // times the combat AI undid our weapon choice
 			float respectAIUntil = 0.0f;
 			float unreachableUntil = 0.0f;    // melee could not reach its target recently
+			// can't reach the target: sticking close to the player until the way to it opens up
+			bool  tagAlong = false;
+			RE::ActorHandle tagTarget;
+			float tagRetryAt = 0.0f;
 			float engagingUntil = 0.0f;       // just told to attack: the game may not show combat yet
 			float lastFinish = -100.0f;
 			RE::ActorHandle chargeTarget;
@@ -1360,6 +1364,13 @@ namespace Followers
 			            state->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal;
 			bool  sameSpace = f->GetWorldspace() == player->GetWorldspace() &&
 			                 (player->GetWorldspace() || f->GetParentCell() == player->GetParentCell());
+			// tagging along after an unreachable enemy ends with the fight, a retreat or a new target
+			if (s.tagAlong && (!inCombat || busy || g_retreating || g_time < s.recallUntil || !Alive(CombatTarget(f)) ||
+								  Get(s.tagTarget) != CombatTarget(f))) {
+				s.tagAlong = false;
+				if (Driver::IsDriving(f)) Driver::Stop(f);
+				Debug(std::format("{} stops tagging along", Name(f)));
+			}
 
 			// ---- relax in safe places: while the player lingers (sheathed, Medium/Far following), the
 			// follower is put on "wait" (the game's own sandboxing: wander, sit, use furniture) until the
@@ -1437,7 +1448,7 @@ namespace Followers
 			}
 
 			// the driver moves this follower right now (a charge, a dodge): leave it alone
-			if (Driver::IsDriving(f) && !s.formationDrive) return;
+			if (Driver::IsDriving(f) && !s.formationDrive && !s.tagAlong) return;
 
 			// ---- keep-offset follow
 			// Close/Medium: the movement driver holds the follower's spot next to the player (one smooth run
@@ -1660,8 +1671,70 @@ namespace Followers
 					return;
 				}
 			}
+			// ---- can't reach the target (even by the player's route or a hop): stick close to the player,
+			// who is likely on the way there, until the target is near and on her level, then let the
+			// game's pathfinding take over.
+			if (s.tagAlong) {
+				const char* why = nullptr;
+				auto        fp = f->GetPosition();
+				if (!cfg.combatMovement || !sameSpace || Get(s.tagTarget) != target || IsRanged(f)) {
+					why = "stopped";
+				} else if (Dist(f, target) < 800.0f && std::fabs(target->GetPosition().z - fp.z) < 150.0f) {
+					why = "in reach";
+				}
+				RE::Actor* other = nullptr;
+				if (!why) {
+					for (auto e : a_scan.enemies) {
+						if (e == target || !Alive(e)) continue;
+						auto ep = e->GetPosition();
+						if (fp.GetDistance(ep) < 700.0f && std::fabs(ep.z - fp.z) < 120.0f && Driver::ClearLine(f, fp, ep)) {
+							other = e;
+							why = "another enemy in reach";
+							break;
+						}
+					}
+				}
+				if (why) {
+					if (Driver::IsDriving(f)) Driver::Stop(f);
+					s.tagAlong = false;
+					s.unreachableUntil = 0.0f;
+					s.bestTargetDist = Dist(f, target);
+					s.bestTargetTime = g_time;
+					Debug(std::format("{} stops tagging along ({})", Name(f), why));
+					if (other) {
+						StartCombat(f, s, other, "in reach");
+						return;
+					}
+				} else {
+					if (!Driver::IsDriving(f) && g_time >= s.tagRetryAt) {
+						std::string_view lastEnd = Driver::LastEnd(f);
+						bool             moved = false;
+						if (lastEnd == "blocked" || lastEnd == "edge" || lastEnd == "step" || lastEnd == "too far") {
+							moved = TryHop(f, s, player) || RunTrail(f, s, player, nullptr, "to you");
+						}
+						if (!moved) {
+							Driver::Order order = FormationOrder(0);
+							order.target = player->GetHandle();
+							order.speed = Tuning::Get().chargeSpeed;
+							order.sprintSpeed = 715.0f;
+							order.looseness = 1.0f;
+							order.duration = 3600.0f;
+							if (!Driver::Start(f, order)) s.tagRetryAt = g_time + 1.5f;  // the game's pathing for a moment
+						}
+					}
+					return;
+				}
+			}
 			if (MaybeCharge(f, s, target)) return;
 			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
+			if (cfg.combatMovement && !s.tagAlong && g_time < s.unreachableUntil && !IsRanged(f) && sameSpace &&
+				Dist(f, target) > 300.0f && !Driver::IsDriving(f)) {
+				s.tagAlong = true;
+				s.tagTarget = target->GetHandle();
+				s.tagRetryAt = 0.0f;
+				Debug(std::format("{} can't reach {}, sticks with you", Name(f), Name(target)));
+				return;
+			}
 			if (Dist(f, target) > 300.0f) StandUp(f);
 
 			// ---- summons: go for the summoner when it can be reached
