@@ -71,6 +71,10 @@ Int Function FindToggle(Int a_option)
 EndFunction
 
 Event OnPageReset(String a_page)
+	; a save made with an older version still has the old, shorter option lists
+	If !_toggleKeys || _toggleKeys.Length < 11 || !_toggleKeys[10]
+		OnConfigInit()
+	EndIf
 	SetCursorFillMode(TOP_TO_BOTTOM)
 	Int i = 0
 	While i < _toggleOIDs.Length
