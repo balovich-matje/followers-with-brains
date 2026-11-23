@@ -51,6 +51,39 @@ namespace Test
 		int   g_run = 0;
 		bool  g_menuSeen = false;
 		std::vector<RE::ActorHandle> g_spawned;
+		struct Placement
+		{
+			float distance;
+			float angle;     // around the player, relative to their facing
+			int   attempts = 0;
+		};
+		std::vector<Placement> g_placements;  // parallel to g_spawned
+		int   g_relocated = 0;
+		float g_waterCheck = 0.0f;
+
+		void Place(RE::Actor* a_actor, const Placement& a_place)
+		{
+			auto  player = RE::PlayerCharacter::GetSingleton();
+			float z = player->GetAngleZ() + a_place.angle;
+			Papyrus::MoveTo(a_actor, player, std::sin(z) * a_place.distance, std::cos(z) * a_place.distance);
+		}
+
+		// Bandits that land in water can't be reached: move them around the player until they are dry.
+		void FixWater()
+		{
+			for (std::size_t i = 0; i < g_spawned.size(); ++i) {
+				auto ptr = g_spawned[i].get();
+				auto a = ptr.get();
+				if (!a || a->IsDead()) continue;
+				if (!a->IsInWater() && !a->AsActorState()->IsSwimming()) continue;
+				auto& place = g_placements[i];
+				if (++place.attempts > 7) continue;
+				place.angle += 0.785f;  // 45 degrees further round
+				Place(a, place);
+				++g_relocated;
+				logger::info("[test] {} was in water, moved (try {})", a->GetDisplayFullName(), place.attempts);
+			}
+		}
 		std::ofstream g_trace;
 		std::ofstream g_report;
 
@@ -137,20 +170,20 @@ namespace Test
 			logger::info("[test] run {} start, follower {}", g_run + 1, Name(follower));
 			Console("tgm");  // keep the player alive; the follower is left as is
 			g_spawned.clear();
-			float z = player->GetAngleZ();
-			RE::NiPoint3 fwd{ std::sin(z), std::cos(z), 0.0f };
-			RE::NiPoint3 right{ std::cos(z), -std::sin(z), 0.0f };
+			g_placements.clear();
+			g_relocated = 0;
+			g_waterCheck = 0.0f;
 			for (auto& spawn : Scenario(g_cfg.scenario)) {
 				auto base = RE::TESForm::LookupByID<RE::TESNPC>(spawn.base);
 				if (!base) continue;
 				auto ref = player->PlaceObjectAtMe(base, false);
 				auto actor = ref ? ref->As<RE::Actor>() : nullptr;
 				if (!actor) continue;
-				float x = fwd.x * spawn.forward + right.x * spawn.side;
-				float y = fwd.y * spawn.forward + right.y * spawn.side;
-				Papyrus::MoveTo(actor, player, x, y);
+				Placement place{ std::sqrt(spawn.forward * spawn.forward + spawn.side * spawn.side), std::atan2(spawn.side, spawn.forward) };
+				Place(actor, place);
 				Papyrus::StartCombat(actor, player);
 				g_spawned.push_back(actor->GetHandle());
+				g_placements.push_back(place);
 			}
 			g_firstDamage = -1.0f;
 			g_meleeNearTime = g_rangedNearTime = g_meleeFarTime = g_rangedFarTime = g_idleNearTime = 0.0f;
@@ -177,13 +210,13 @@ namespace Test
 			auto follower = FirstFollower();
 			auto info = Followers::GetDebugInfo(follower);
 			g_report << std::format(
-				"run {} ({}): {} after {:.1f}s, {} of {} spawned enemies alive\n"
+				"run {} ({}): {} after {:.1f}s, {} of {} spawned enemies alive, {} moved out of water\n"
 				"  first damage dealt at {}\n"
 				"  enemy within 700: melee {:.1f}s, ranged {:.1f}s, standing idle {:.1f}s\n"
 				"  enemy further away: melee {:.1f}s, ranged {:.1f}s\n"
 				"  weapon switches seen: {}, mod wanted: {}\n"
 				"  damage dealt: melee {:.0f} ({} hits), ranged {:.0f} ({} hits); follower health {:.0f}\n",
-				g_run + 1, g_cfg.scenario, a_why, g_timer, AliveSpawned(), g_spawned.size(),
+				g_run + 1, g_cfg.scenario, a_why, g_timer, AliveSpawned(), g_spawned.size(), g_relocated,
 				g_firstDamage < 0.0f ? std::string{ "never" } : std::format("{:.1f}s", g_firstDamage),
 				g_meleeNearTime, g_rangedNearTime, g_idleNearTime, g_meleeFarTime, g_rangedFarTime,
 				g_switches, info.pref == 1 ? "melee" : (info.pref == 2 ? "ranged" : "nothing"),
@@ -294,6 +327,10 @@ namespace Test
 			if (g_timer > 4.0f) StartRun();
 			break;
 		case Phase::kRunning:
+			if (g_timer < 6.0f && g_timer - g_waterCheck >= 0.5f) {
+				g_waterCheck = g_timer;
+				FixWater();
+			}
 			Sample(a_delta);
 			if (g_spawned.empty()) {
 				EndRun("nothing spawned");
