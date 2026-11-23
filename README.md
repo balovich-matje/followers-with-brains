@@ -55,13 +55,27 @@ The goal: a follower that plays like a person, not like a script.
 - Step out of area damage (fire, frost and poison clouds, runes).
 - Get out of your way in narrow corridors and doorways.
 - Ranged followers keep their distance from melee enemies and don't shoot through you.
+- Kiting: archers and mages use the terrain like a player does (get up on rocks, circle tables
+  and pillars, hop a fence, hit and step back out of reach).
+- Strafe sideways when an enemy archer or caster is aiming at them.
 
 **Teamwork**
 - Focus fire: when you keep hitting the same enemy, followers help finish it.
 - Protect you: when you are low on health, melee followers go for whoever is hitting you.
 - Interrupt casters with a shield bash or a quick attack.
+- Bob and weave: bait a melee swing, step out of reach, step back in and land a hit. Step away
+  from power attacks.
+- Sneak volleys: while you sneak, a follower with a bow shoots your marked target the moment you
+  shoot.
+- Cover a downed (bleeding out) ally.
 - Regroup: a badly hurt follower falls back to you instead of fighting alone.
 - Stealth: while you sneak, followers sneak, keep further back and wait for your first shot.
+
+**Feeling alive**
+- Look where you aim, and at what you look at.
+- Keep watch facing outward while you loot or craft in dangerous places; relax in towns.
+- Hold doors: wait at a doorway until you are through instead of blocking it.
+- Light a torch in the dark when nobody has one.
 
 **Upkeep**
 - Use their own potions at sensible health thresholds.
