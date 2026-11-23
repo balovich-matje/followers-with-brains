@@ -225,17 +225,18 @@ namespace Driver
 			case Kind::kCharge:
 				{
 					if (dist <= d.order.stopDistance) return "arrived";
+					// A player's running weave (measured): facing the target, running diagonally at 45
+					// degrees, swapping sides every 0.25-0.6 s. The legs play the diagonal run that goes
+					// with it. Straight in for the last stretch.
 					if (d.elapsed >= d.nextFlip) {
 						d.side = -d.side;
-						d.nextFlip = d.elapsed + 0.9f + static_cast<float>(std::rand() % 50) / 100.0f;
+						d.nextFlip = d.elapsed + 0.25f + static_cast<float>(std::rand() % 35) / 100.0f;
 					}
 					RE::NiPoint3 across{ -toDir.y, toDir.x, 0.0f };
-					// a gentle weave (about 20 degrees off the line), less as the target gets close;
-					// the body faces where it runs, so the legs play a plain run, and turns at a run's rate
-					float        weave = std::min(1.0f, dist / 1200.0f) * 0.38f;
+					float        weave = dist > d.order.stopDistance + 250.0f ? 1.0f : 0.0f;  // tan(45 deg)
 					RE::NiPoint3 aim = toDir + across * (weave * static_cast<float>(d.side));
 					move = aim / aim.Length();
-					face = Heading(move);
+					face = Heading(toDir);
 					break;
 				}
 			case Kind::kStepBack:
@@ -255,7 +256,10 @@ namespace Driver
 						}
 						return nullptr;
 					}
-					move = toDir * -1.0f;
+					// diagonal backpedal, as a player does it (measured ~450 units/s)
+					RE::NiPoint3 across{ -toDir.y, toDir.x, 0.0f };
+					RE::NiPoint3 back = toDir * -1.0f + across * static_cast<float>(d.side);
+					move = back / back.Length();
 					face = Heading(toDir);
 					break;
 				}
@@ -267,12 +271,7 @@ namespace Driver
 			}
 
 			float dt = std::min(a_delta, 0.05f);
-			float turnRate = d.order.kind == Kind::kCharge ? 3.0f : 8.0f;  // radians per second
-			float heading = TurnToward(a->GetAngleZ(), face, turnRate * dt);
-			if (d.order.kind == Kind::kCharge) {
-				// run where the body faces, so a change of side is a curve, not a sideways slide
-				move = RE::NiPoint3{ std::sin(heading), std::cos(heading), 0.0f };
-			}
+			float heading = TurnToward(a->GetAngleZ(), face, 8.0f * dt);
 			float        step = d.order.speed * dt;
 			RE::NiPoint3 next = pos + move * step;
 
@@ -370,6 +369,7 @@ namespace Driver
 		auto& d = g_drives[a_actor->GetFormID()];
 		d = Drive{};
 		d.order = a_order;
+		d.side = (std::rand() % 2) ? 1 : -1;
 		SetDriven(a_actor->GetFormID(), true);
 		return true;
 	}

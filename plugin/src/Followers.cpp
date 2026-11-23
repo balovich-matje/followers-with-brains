@@ -759,7 +759,7 @@ namespace Followers
 					Driver::Order order;
 					order.kind = Driver::Kind::kStepBack;
 					order.target = e->GetHandle();
-					order.speed = 300.0f;  // what a backpedal animation can keep up with
+					order.speed = 450.0f;  // a player's diagonal backpedal (measured)
 					order.stopDistance = Dist(f, e) + reach * 0.5f + 80.0f;
 					order.duration = 1.8f;  // the drive ends when the swing is over
 					order.holdWhileAttacked = true;
@@ -927,10 +927,10 @@ namespace Followers
 			Driver::Order order;
 			order.kind = Driver::Kind::kCharge;
 			order.target = a_target->GetHandle();
-			order.speed = 520.0f;
+			order.speed = 510.0f;  // a player's run (measured); sprint waits for a working sprint animation
 			order.stopDistance = kChargeStop;
 			order.duration = 10.0f;
-			order.sprint = true;
+			order.sprint = false;
 			if (!Driver::Start(f, order)) return false;
 			g_nextCharge[f->GetFormID()] = g_time + 4.0f;
 			++g_stats.zigzags;
