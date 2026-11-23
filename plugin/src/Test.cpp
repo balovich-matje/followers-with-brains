@@ -175,8 +175,11 @@ namespace Test
 			auto player = RE::PlayerCharacter::GetSingleton();
 			auto follower = FirstFollower();
 			logger::info("[test] run {} start, follower {}", g_run + 1, Name(follower));
-			Console("tgm");               // keep the player alive; the follower is left as is
-			Console("set KillMove to 0");  // kill animations would end a fight before anything happens
+			// keep the player alive (the test save is never saved, so this is temporary); the follower is left as is
+			player->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, 100000.0f);
+			player->AsActorValueOwner()->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, 100000.0f);
+			// kill animations would end a fight before anything happens
+			if (auto killMove = RE::TESForm::LookupByEditorID<RE::TESGlobal>("KillMove")) killMove->value = 0.0f;
 			g_spawned.clear();
 			g_placements.clear();
 			g_relocated = 0;
@@ -190,7 +193,7 @@ namespace Test
 				Placement place{ std::sqrt(spawn.forward * spawn.forward + spawn.side * spawn.side), std::atan2(spawn.side, spawn.forward) };
 				Place(actor, place);
 				actor->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, g_cfg.enemyHealth);
-				Papyrus::StartCombat(actor, player);
+				Papyrus::StartCombat(actor, follower ? follower : static_cast<RE::Actor*>(player));
 				g_spawned.push_back(actor->GetHandle());
 				g_placements.push_back(place);
 			}
