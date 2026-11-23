@@ -1,4 +1,6 @@
-#include "PCH.h"
+#include "Followers.h"
+#include "Papyrus.h"
+#include "Settings.h"
 
 namespace
 {
@@ -19,8 +21,17 @@ namespace
 
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
-		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
-			logger::info("Data loaded");
+		switch (a_msg->type) {
+		case SKSE::MessagingInterface::kDataLoaded:
+			Settings::Load();
+			Followers::Install();
+			break;
+		case SKSE::MessagingInterface::kPostLoadGame:
+		case SKSE::MessagingInterface::kNewGame:
+			Followers::Reset();
+			break;
+		default:
+			break;
 		}
 	}
 }
@@ -38,6 +49,14 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	SetupLog();
 	logger::info("FollowersWithBrains {} loaded (game {})", SKSEPlugin_Version.GetVersion().string(),
 		a_skse->RuntimeVersion().string());
+
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
+	SKSE::GetPapyrusInterface()->Register(Papyrus::Register);
+
+	auto serialization = SKSE::GetSerializationInterface();
+	serialization->SetUniqueID('FWBR');
+	serialization->SetSaveCallback(Followers::OnSave);
+	serialization->SetLoadCallback(Followers::OnLoad);
+	serialization->SetRevertCallback(Followers::OnRevert);
 	return true;
 }

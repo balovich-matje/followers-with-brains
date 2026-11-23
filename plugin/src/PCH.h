@@ -5,3 +5,12 @@
 
 namespace logger = SKSE::log;
 using namespace std::literals;
+
+#include <algorithm>
+#include <deque>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <mutex>
+#include <unordered_map>
+#include <vector>

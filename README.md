@@ -25,6 +25,16 @@ Work in progress.
   then just run.
 - Backing off to heal does not count as a retreat while you are healing your followers.
 
+**Smarter targeting**
+- Followers go for a summoner instead of the summon when they can reach them, unless the
+  summon keeps hitting them.
+- A melee follower who misses twice while another enemy hits them switches to that enemy.
+- A melee follower stuck short of its target tries another way, or fights whoever is hitting it.
+
+## Building
+`tools/build.sh` builds the SKSE plugin (CommonLibSSE-NG, clang-cl + xwin) and the Papyrus
+scripts (Caprica). `tools/make_esp.py` writes the plugin file that hosts the MCM.
+
 ## Requirements
 - SKSE64 and Address Library for SKSE Plugins
 - SkyUI (for the MCM)
