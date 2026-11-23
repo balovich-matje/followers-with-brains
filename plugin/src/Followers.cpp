@@ -1,4 +1,5 @@
 #include "Followers.h"
+#include "Loadout.h"
 #include "Papyrus.h"
 #include "Settings.h"
 
@@ -41,6 +42,15 @@ namespace Followers
 			int   offsetMode = -1;  // keep-offset currently applied (-1 none)
 			int   offsetSlot = -1;
 			float speedBoost = 0.0f;
+			std::map<RE::ActorValue, float> avMods;  // temporary actor value changes we made
+			float recallUntil = 0.0f;                 // heading back to the player until then
+			float healedUntil = 0.0f;                 // player healed this follower recently
+			Loadout::Options loadout;
+			float loadoutTime = -100.0f;
+			float lastSwap = -100.0f;
+			float prevTargetDist = -1.0f;
+			float targetDistTime = -100.0f;
+			bool  closing = false;
 			float farSince = -1.0f;
 			float lastStop = -100.0f;
 			float lastRetarget = -100.0f;
@@ -70,7 +80,7 @@ namespace Followers
 		enum class EventType
 		{
 			kPlayerAttack,  // swing / bow release / offensive spell
-			kPlayerHeal,
+			kPlayerHeal,  // b = healed follower (may be empty)
 			kFollowerSwing,
 			kHit,
 			kDeath
@@ -93,7 +103,8 @@ namespace Followers
 		std::mutex                                 g_lock;
 		std::vector<QueuedEvent>                   g_queue;
 		std::unordered_map<RE::FormID, FollowerState> g_state;
-		std::unordered_map<RE::FormID, float>      g_pendingBoostUndo;
+		std::vector<std::tuple<RE::FormID, RE::ActorValue, float>> g_pendingUndo;
+		int g_lastPlayerRanged = -1;
 
 		float g_time = 0.0f;
 		float g_logicTimer = 0.0f;
@@ -191,19 +202,7 @@ namespace Followers
 			return base && !base->IsHostile() && !base->IsDetrimental() && base->data.primaryAV == RE::ActorValue::kHealth;
 		}
 
-		bool IsRanged(RE::Actor* a)
-		{
-			for (bool left : { false, true }) {
-				auto obj = a->GetEquippedObject(left);
-				if (!obj) continue;
-				if (auto weap = obj->As<RE::TESObjectWEAP>()) {
-					if (weap->IsBow() || weap->IsCrossbow() || weap->IsStaff()) return true;
-				} else if (IsHostileSpell(obj)) {
-					return true;
-				}
-			}
-			return false;
-		}
+		bool IsRanged(RE::Actor* a) { return Loadout::HoldsRanged(a); }
 
 		bool PlayerIsHealing(RE::PlayerCharacter* a_player)
 		{
@@ -224,15 +223,60 @@ namespace Followers
 		}
 
 		// ------------------------------------------------------------------ speed boost
+		// Temporary actor value change, undone later (and from the co-save if the game was saved meanwhile).
+		void SetMod(RE::Actor* a, FollowerState& s, RE::ActorValue a_av, float a_amount)
+		{
+			float current = s.avMods.contains(a_av) ? s.avMods[a_av] : 0.0f;
+			if (current == a_amount) return;
+			a->AsActorValueOwner()->ModActorValue(a_av, a_amount - current);
+			if (a_amount == 0.0f) {
+				s.avMods.erase(a_av);
+			} else {
+				s.avMods[a_av] = a_amount;
+			}
+		}
+
 		void SetBoost(RE::Actor* a, FollowerState& s, float a_amount)
 		{
 			if (s.speedBoost == a_amount) return;
-			auto avo = a->AsActorValueOwner();
-			avo->ModActorValue(RE::ActorValue::kSpeedMult, a_amount - s.speedBoost);
+			SetMod(a, s, RE::ActorValue::kSpeedMult, a_amount);
 			// Speed changes only take effect when carry weight is recalculated.
+			auto avo = a->AsActorValueOwner();
 			avo->ModActorValue(RE::ActorValue::kCarryWeight, 0.01f);
 			avo->ModActorValue(RE::ActorValue::kCarryWeight, -0.01f);
 			s.speedBoost = a_amount;
+		}
+
+		// Cowardly for a moment: the combat AI turns and runs instead of backpedalling.
+		void SetFleeing(RE::Actor* a, FollowerState& s, bool a_flee)
+		{
+			if (a_flee == s.avMods.contains(RE::ActorValue::kConfidence)) return;
+			if (a_flee) {
+				float confidence = a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kConfidence);
+				if (confidence > 0.0f) SetMod(a, s, RE::ActorValue::kConfidence, -confidence);
+			} else {
+				SetMod(a, s, RE::ActorValue::kConfidence, 0.0f);
+			}
+		}
+
+		const Loadout::Options& GetLoadout(RE::Actor* a, FollowerState& s)
+		{
+			if (g_time - s.loadoutTime > 5.0f) {
+				s.loadout = Loadout::Read(a);
+				s.loadoutTime = g_time;
+			}
+			return s.loadout;
+		}
+
+		void Swap(RE::Actor* a, FollowerState& s, bool a_ranged, std::string_view a_why)
+		{
+			if (g_time - s.lastSwap < 2.5f || Loadout::IsDrawingBow(a)) return;
+			auto& options = GetLoadout(a, s);
+			bool  done = a_ranged ? Loadout::EquipRanged(a, options) : Loadout::EquipMelee(a, options);
+			if (done) {
+				s.lastSwap = g_time;
+				Debug(std::format("{} switches to {} ({})", Name(a), a_ranged ? "ranged" : "melee", a_why));
+			}
 		}
 
 		void ClearOffset(RE::Actor* a, FollowerState& s)
@@ -478,6 +522,7 @@ namespace Followers
 
 			case EventType::kPlayerHeal:
 				g_lastHeal = g_time;
+				if (b && IsFollower(b, player)) g_state[b->GetFormID()].healedUntil = g_time + 5.0f;
 				break;
 
 			case EventType::kFollowerSwing:
@@ -532,13 +577,48 @@ namespace Followers
 		}
 
 		// ------------------------------------------------------------------ per-follower logic
+		void UpdateWeapons(RE::Actor* f, FollowerState& s, RE::Actor* a_target, bool a_retreating)
+		{
+			auto& options = GetLoadout(f, s);
+			if (!options.HasRanged() || !options.HasMelee() || !a_target) return;
+
+			float d = Dist(f, a_target);
+			if (g_time - s.targetDistTime >= 1.0f) {
+				s.closing = s.prevTargetDist > 0.0f && s.prevTargetDist - d > 100.0f;
+				s.prevTargetDist = d;
+				s.targetDistTime = g_time;
+			}
+			bool ranged = IsRanged(f);
+
+			if (a_retreating) {
+				if (!ranged) Swap(f, s, true, "covering the retreat");
+				return;
+			}
+			if (options.PrefersRanged()) {
+				if (ranged && d < 300.0f) {
+					Swap(f, s, false, "enemy in their face");
+				} else if (!ranged && d > 600.0f) {
+					Swap(f, s, true, "back to range");
+				}
+			} else {
+				// melee is their strength: shoot while enemies are far, switch once they are about to arrive
+				if (ranged && (d < 700.0f || (s.closing && d < 1100.0f))) {
+					Swap(f, s, false, s.closing ? "enemy charging" : "close enough to charge");
+				} else if (!ranged && d > 1100.0f && !s.closing) {
+					Swap(f, s, true, "enemy far away");
+				}
+			}
+		}
+
 		void UpdateFollower(RE::Actor* f, int a_slot, const Scan& a_scan)
 		{
 			auto& cfg = Settings::Get();
 			auto  player = a_scan.player;
 			auto& s = g_state[f->GetFormID()];
 			int   mode = std::clamp(cfg.followDistance, 0, 2);
+			int   combatMode = std::clamp(cfg.combatDistance + (g_time < s.healedUntil ? 1 : 0), 0, 2);
 			auto& tune = kTuning[mode];
+			float leash = kTuning[combatMode].combatLeash;
 			float dist = Dist(f, player);
 			bool  inCombat = f->IsInCombat();
 			bool  waiting = IsWaiting(f);
@@ -548,34 +628,43 @@ namespace Followers
 			bool  sameSpace = f->GetWorldspace() == player->GetWorldspace() &&
 			                 (player->GetWorldspace() || f->GetParentCell() == player->GetParentCell());
 
-			// ---- retreat: disengage
-			bool disengage = false;
-			if (g_retreating && !waiting) {
-				bool rangedClose = IsRanged(f) && dist < cfg.rangedRetreatDistance;
-				disengage = !rangedClose;
-				if (disengage && inCombat && g_time - s.lastStop > 1.0f) {
-					Disengage(f, s);
-					inCombat = false;
+			// ---- retreat / recall: head back to the player
+			bool recalling = !waiting && !busy && (g_retreating || g_time < s.recallUntil);
+			bool coverFire = false;
+			if (recalling) {
+				auto& options = GetLoadout(f, s);
+				coverFire = g_retreating && options.HasRanged() && dist < cfg.rangedRetreatDistance;
+				if (coverFire) {
+					// keep shooting while backing off with the player
+					if (cfg.smartWeapons) UpdateWeapons(f, s, CombatTarget(f), true);
+					SetFleeing(f, s, false);
+				} else {
+					if (inCombat && g_time - s.lastStop > 1.0f) Disengage(f, s);
+					SetFleeing(f, s, true);
 				}
+			} else {
+				SetFleeing(f, s, false);
 			}
 
-			// ---- keep-offset follow (out of combat)
-			bool wantOffset = (!inCombat || disengage) && !busy && sameSpace && dist < 4000.0f && (mode != 2 || disengage);
+			// ---- keep-offset follow
+			bool wantOffset = !busy && sameSpace && dist < 4000.0f &&
+			                  (recalling || (!inCombat && mode != 2));
 			if (wantOffset) {
-				ApplyOffset(f, s, player, disengage ? 0 : mode, a_slot);
+				ApplyOffset(f, s, player, recalling ? 0 : mode, a_slot);
 			} else {
 				ClearOffset(f, s);
 			}
 
 			// ---- catch-up speed and teleport
-			bool travelling = (!inCombat || disengage) && !busy && sameSpace;
-			if (cfg.catchUp && travelling && dist > tune.boostDistance) {
+			bool travelling = (!inCombat || recalling) && !busy && sameSpace;
+			float boostAt = recalling ? 300.0f : tune.boostDistance;
+			if (cfg.catchUp && travelling && dist > boostAt) {
 				SetBoost(f, s, kSpeedBoost);
-			} else if (s.speedBoost != 0.0f && (!travelling || dist < tune.boostDistance * 0.6f)) {
+			} else if (s.speedBoost != 0.0f && (!travelling || dist < boostAt * 0.6f)) {
 				SetBoost(f, s, 0.0f);
 			}
 
-			if (cfg.teleport && travelling && !waiting && dist > tune.teleportDistance) {
+			if (cfg.teleport && travelling && !inCombat && dist > tune.teleportDistance) {
 				if (s.farSince < 0.0f) s.farSince = g_time;
 				bool seen = false;
 				bool unused = false;
@@ -597,12 +686,23 @@ namespace Followers
 				s.farSince = -1.0f;
 			}
 
-			if (!inCombat || disengage) {
+			// ---- out of combat: match the player's weapon choice
+			if (!inCombat && !recalling && cfg.matchWeapons && !busy) {
+				int playerRanged = player->AsActorState()->IsWeaponDrawn() ? (IsRanged(player) ? 1 : 0) : -1;
+				if (playerRanged >= 0 && playerRanged != (IsRanged(f) ? 1 : 0)) {
+					auto& options = GetLoadout(f, s);
+					if (playerRanged == 1 ? options.HasRanged() : options.HasMelee()) {
+						Swap(f, s, playerRanged == 1, "matching you");
+					}
+				}
+			}
+
+			if (!inCombat || recalling) {
 				s.missedSwings = 0;
 				s.stuckSince = -1.0f;
 				// join the fight when the player is fighting and nobody told us
-				if (!disengage && !waiting && !g_retreating && cfg.awareness && player->IsInCombat()) {
-					float reach = cfg.combatLeash ? tune.combatLeash : 2500.0f;
+				if (!recalling && !waiting && !g_retreating && cfg.awareness && player->IsInCombat()) {
+					float reach = cfg.combatLeash ? leash : 2500.0f;
 					if (auto enemy = PickEnemy(f, a_scan, nullptr, reach); enemy && g_time - s.lastRetarget > 1.0f && g_time - s.lastStop > 3.0f) {
 						StartCombat(f, s, enemy, "joining your fight");
 					}
@@ -614,23 +714,26 @@ namespace Followers
 
 			// ---- retarget when the target is gone
 			if (cfg.retarget && !Alive(target) && g_time - s.lastRetarget > 0.5f) {
-				if (auto next = PickEnemy(f, a_scan, nullptr, cfg.combatLeash ? tune.combatLeash : kEnemyRange)) StartCombat(f, s, next, "next enemy");
+				if (auto next = PickEnemy(f, a_scan, nullptr, cfg.combatLeash ? leash : kEnemyRange)) StartCombat(f, s, next, "next enemy");
 				return;
 			}
 			if (!target) return;
 
 			// ---- leash: don't chase enemies far away from the player
-			if (cfg.combatLeash && dist > tune.combatLeash && Dist(target, player) > tune.combatLeash * 0.8f &&
-				g_time - s.lastLeash > 6.0f) {
+			if (cfg.combatLeash && dist > leash && Dist(target, player) > leash * 0.8f && g_time - s.lastLeash > 2.0f) {
 				s.lastLeash = g_time;
-				if (auto closer = PickEnemy(f, a_scan, nullptr, tune.combatLeash)) {
+				if (auto closer = PickEnemy(f, a_scan, nullptr, leash)) {
 					StartCombat(f, s, closer, "too far from you");
 				} else {
+					s.recallUntil = g_time + 3.0f;
 					Disengage(f, s);
 					Debug(std::format("{} falls back to you", Name(f)));
 				}
 				return;
 			}
+
+			// ---- ranged or melee
+			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
 
 			// ---- summons: go for the summoner when it can be reached
 			if (cfg.focusSummoners && target->IsCommandedActor() && g_time - s.lastRetarget > 1.0f) {
@@ -719,6 +822,8 @@ namespace Followers
 				if (form) {
 					ClearOffset(form, kv.second);
 					SetBoost(form, kv.second, 0.0f);
+					SetFleeing(form, kv.second, false);
+					for (auto [av, amount] : kv.second.avMods) form->AsActorValueOwner()->ModActorValue(av, -amount);
 				}
 				return true;
 			});
@@ -771,7 +876,7 @@ namespace Followers
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESMagicEffectApplyEvent* a_event, RE::BSTEventSource<RE::TESMagicEffectApplyEvent>*) override
 			{
 				if (a_event && a_event->caster && a_event->caster->IsPlayerRef() && IsHealingEffect(a_event->magicEffect)) {
-					Queue(EventType::kPlayerHeal, {});
+					Queue(EventType::kPlayerHeal, {}, HandleOf(a_event->target.get()));
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
@@ -827,14 +932,14 @@ namespace Followers
 		g_marked = {};
 		g_watchTarget = {};
 
-		// undo speed boosts that were saved into this game
-		for (auto& [id, amount] : g_pendingBoostUndo) {
+		// undo temporary changes that were saved into this game
+		for (auto& [id, av, amount] : g_pendingUndo) {
 			if (auto actor = RE::TESForm::LookupByID<RE::Actor>(id)) {
-				actor->AsActorValueOwner()->ModActorValue(RE::ActorValue::kSpeedMult, -amount);
-				logger::info("Removed leftover speed boost from {}", Name(actor));
+				actor->AsActorValueOwner()->ModActorValue(av, -amount);
+				logger::info("Removed leftover change ({}) from {}", static_cast<int>(av), Name(actor));
 			}
 		}
-		g_pendingBoostUndo.clear();
+		g_pendingUndo.clear();
 	}
 
 	void Tick(float a_delta)
@@ -851,15 +956,16 @@ namespace Followers
 
 	void OnSave(SKSE::SerializationInterface* a_intfc)
 	{
-		std::vector<std::pair<RE::FormID, float>> boosts;
-		for (auto& [id, s] : g_state) {
-			if (s.speedBoost != 0.0f) boosts.emplace_back(id, s.speedBoost);
+		std::vector<std::tuple<RE::FormID, RE::ActorValue, float>> mods;
+		for (auto& [id, st] : g_state) {
+			for (auto [av, amount] : st.avMods) mods.emplace_back(id, av, amount);
 		}
-		if (!a_intfc->OpenRecord(kRecordBoosts, 1)) return;
-		auto count = static_cast<std::uint32_t>(boosts.size());
+		if (!a_intfc->OpenRecord(kRecordBoosts, 2)) return;
+		auto count = static_cast<std::uint32_t>(mods.size());
 		a_intfc->WriteRecordData(count);
-		for (auto& [id, amount] : boosts) {
+		for (auto& [id, av, amount] : mods) {
 			a_intfc->WriteRecordData(id);
+			a_intfc->WriteRecordData(static_cast<std::uint32_t>(av));
 			a_intfc->WriteRecordData(amount);
 		}
 	}
@@ -872,17 +978,19 @@ namespace Followers
 			std::uint32_t count = 0;
 			a_intfc->ReadRecordData(count);
 			for (std::uint32_t i = 0; i < count; ++i) {
-				RE::FormID id = 0, resolved = 0;
-				float      amount = 0.0f;
+				RE::FormID    id = 0, resolved = 0;
+				std::uint32_t av = static_cast<std::uint32_t>(RE::ActorValue::kSpeedMult);
+				float         amount = 0.0f;
 				a_intfc->ReadRecordData(id);
+				if (version >= 2) a_intfc->ReadRecordData(av);
 				a_intfc->ReadRecordData(amount);
-				if (a_intfc->ResolveFormID(id, resolved)) g_pendingBoostUndo[resolved] = amount;
+				if (a_intfc->ResolveFormID(id, resolved)) g_pendingUndo.emplace_back(resolved, static_cast<RE::ActorValue>(av), amount);
 			}
 		}
 	}
 
 	void OnRevert(SKSE::SerializationInterface*)
 	{
-		g_pendingBoostUndo.clear();
+		g_pendingUndo.clear();
 	}
 }

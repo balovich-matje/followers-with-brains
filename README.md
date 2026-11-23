@@ -6,7 +6,7 @@ Work in progress.
 ## Planned features
 
 **Keeping up**
-- Follow distance setting: *Close*, *Medium* or *Far*.
+- Separate follow distance (out of combat) and combat distance: *Close*, *Medium* or *Far*.
   - *Close*: followers stay within interaction range and start moving the moment you do.
   - *Medium*: a looser follow.
   - *Far*: the game's own follow behaviour.
@@ -23,7 +23,15 @@ Work in progress.
 - If you disengage from a fight, followers disengage with you.
 - Ranged followers keep shooting while backing off as long as they are not too far from you,
   then just run.
-- Backing off to heal does not count as a retreat while you are healing your followers.
+- Melee followers turn and run with you instead of backpedalling.
+- Backing off to heal does not count as a retreat. A follower you just healed may fight one
+  distance step further from you for a few seconds.
+
+**Weapons**
+- Followers who carry both ranged and melee weapons pick by skill and distance: a sword fighter
+  shoots while enemies are far and switches to the sword as they arrive; an archer switches to
+  melee only when an enemy is in their face.
+- Out of combat, followers draw their ranged weapon when you draw yours.
 
 **Smarter targeting**
 - Followers go for a summoner instead of the summon when they can reach them, unless the

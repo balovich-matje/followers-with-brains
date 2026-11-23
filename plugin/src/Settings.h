@@ -13,7 +13,8 @@ namespace Settings
 	struct Values
 	{
 		// Movement
-		int  followDistance = 0;
+		int  followDistance = 0;  // out of combat
+		int  combatDistance = 0;  // how far from the player followers fight
 		bool catchUp = true;
 		bool teleport = true;
 		bool combatLeash = true;
@@ -25,6 +26,8 @@ namespace Settings
 		bool  meleeSwitch = true;
 		bool  retreat = true;
 		float rangedRetreatDistance = 1200.0f;
+		bool  smartWeapons = true;   // switch between ranged and melee by distance and skill
+		bool  matchWeapons = true;   // out of combat, draw ranged when the player does
 
 		// Misc
 		bool debug = false;

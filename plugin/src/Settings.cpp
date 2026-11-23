@@ -26,6 +26,7 @@ namespace Settings
 
 		constexpr IntField kInts[] = {
 			{ "FollowDistance"sv, &Values::followDistance },
+			{ "CombatDistance"sv, &Values::combatDistance },
 		};
 		constexpr BoolField kBools[] = {
 			{ "CatchUp"sv, &Values::catchUp },
@@ -36,6 +37,8 @@ namespace Settings
 			{ "FocusSummoners"sv, &Values::focusSummoners },
 			{ "MeleeSwitch"sv, &Values::meleeSwitch },
 			{ "Retreat"sv, &Values::retreat },
+			{ "SmartWeapons"sv, &Values::smartWeapons },
+			{ "MatchWeapons"sv, &Values::matchWeapons },
 			{ "Debug"sv, &Values::debug },
 		};
 		constexpr FloatField kFloats[] = {
@@ -142,6 +145,7 @@ namespace Settings
 			}
 		}
 		g_values.followDistance = std::clamp(g_values.followDistance, 0, 2);
+		g_values.combatDistance = std::clamp(g_values.combatDistance, 0, 2);
 		g_values.rangedRetreatDistance = std::clamp(g_values.rangedRetreatDistance, 300.0f, 4000.0f);
 		logger::info("Settings loaded");
 	}
