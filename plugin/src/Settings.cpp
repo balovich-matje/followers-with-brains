@@ -25,15 +25,12 @@ namespace Settings
 		};
 
 		constexpr IntField kInts[] = {
-			{ "FollowDistance"sv, &Values::followDistance },
 			{ "CombatDistance"sv, &Values::combatDistance },
-			{ "Placement"sv, &Values::placement },
 		};
 		constexpr BoolField kBools[] = {
 			{ "CombatMovement"sv, &Values::combatMovement },
 			{ "OutsideMovement"sv, &Values::outsideMovement },
 			{ "CatchUp"sv, &Values::catchUp },
-			{ "Sandbox"sv, &Values::sandbox },
 			{ "Teleport"sv, &Values::teleport },
 			{ "CombatLeash"sv, &Values::combatLeash },
 			{ "Awareness"sv, &Values::awareness },
@@ -150,9 +147,7 @@ namespace Settings
 				logger::warn("Bad value for {}: {}", key, value);
 			}
 		}
-		g_values.followDistance = std::clamp(g_values.followDistance, 0, 2);
 		g_values.combatDistance = std::clamp(g_values.combatDistance, 0, 2);
-		g_values.placement = std::clamp(g_values.placement, 0, 3);
 		g_values.rangedRetreatDistance = std::clamp(g_values.rangedRetreatDistance, 300.0f, 4000.0f);
 		logger::info("Settings loaded");
 	}

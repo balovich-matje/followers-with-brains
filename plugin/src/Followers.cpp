@@ -56,7 +56,6 @@ namespace Followers
 			RE::NiPoint3 followSample;
 			float followSampleTime = -100.0f;
 			float nextTrail = 0.0f;
-			bool  sandboxing = false;
 			float looseness = 1.0f;
 			float otherSpaceSince = -1.0f;
 			float driveStarted = -100.0f;
@@ -405,15 +404,7 @@ namespace Followers
 			auto& t = kTuning[a_mode];
 			float n = static_cast<float>((a_slot + 1) / 2);
 			float sign = a_slot % 2 ? 1.0f : -1.0f;
-			int   placement = a_mode == 0 ? std::clamp(Settings::Get().placement, 0, 2) : 0;
-			switch (placement) {
-			case 1:  // at the side, level with the player
-				return { (a_slot == 0 ? 1.0f : -sign) * (130.0f + 60.0f * n), 10.0f - 30.0f * n };
-			case 2:  // ahead, nearly in the middle
-				return { (a_slot == 0 ? 30.0f : sign * (80.0f + 40.0f * n)), 200.0f + 40.0f * n };
-			default:  // behind
-				return { a_slot == 0 ? 0.0f : sign * t.side * n, -(t.back + 50.0f * n) };
-			}
+			return { a_slot == 0 ? 0.0f : sign * t.side * n, -(t.back + 50.0f * n) };  // behind
 		}
 
 		// ------------------------------------------------------------------ the player's trail
@@ -563,91 +554,15 @@ namespace Followers
 			return true;
 		}
 
-		// A city, town, inn, store, temple or player home, not inside a dungeon. Out of combat only.
-		bool InSafePlace(RE::PlayerCharacter* a_player)
-		{
-			if (a_player->IsInCombat()) return false;
-			auto loc = a_player->GetCurrentLocation();
-			if (!loc) return false;
-			static constexpr std::string_view kDanger[] = { "LocTypeDungeon"sv, "LocTypeClearable"sv, "LocTypeBanditCamp"sv,
-				"LocTypeDraugrCrypt"sv, "LocTypeAnimalDen"sv, "LocTypeDwarvenAutomatons"sv };
-			for (auto k : kDanger) {
-				if (loc->HasKeywordString(k)) return false;
-			}
-			static constexpr std::string_view kSafe[] = { "LocTypePlayerHouse"sv, "LocTypeCity"sv, "LocTypeTown"sv,
-				"LocTypeInn"sv, "LocTypeStore"sv, "LocTypeTemple"sv, "LocTypeHouse"sv, "LocTypeSettlement"sv };
-			for (int depth = 0; loc && depth < 6; ++depth, loc = loc->parentLoc) {
-				for (auto k : kSafe) {
-					if (loc->HasKeywordString(k)) return true;
-				}
-			}
-			return false;
-		}
-
-		// how long the player has stayed within a few meters, or been busy in a menu
-		RE::NiPoint3 g_lingerAt;
-		float        g_lingerSince = 0.0f;
-		RE::TESObjectCELL* g_lingerCell = nullptr;
-		float        g_menuSince = -1.0f;
-		float        g_lingerSeconds = 0.0f;
-		int          g_lastSafe = -1;
-		float        g_lastDrawn = -1000.0f;
-
-		float PlayerLingering(RE::PlayerCharacter* a_player)
-		{
-			auto pos = a_player->GetPosition();
-			if (a_player->GetParentCell() != g_lingerCell || pos.GetDistance(g_lingerAt) > 350.0f) {
-				g_lingerAt = pos;
-				g_lingerCell = a_player->GetParentCell();
-				g_lingerSince = g_time;
-			}
-			auto ui = RE::UI::GetSingleton();
-			bool busy = ui && (ui->IsMenuOpen(RE::DialogueMenu::MENU_NAME) || ui->IsMenuOpen(RE::CraftingMenu::MENU_NAME) ||
-			                      ui->IsMenuOpen(RE::BarterMenu::MENU_NAME));
-			if (busy) {
-				if (g_menuSince < 0.0f) g_menuSince = g_time;
-			} else {
-				g_menuSince = -1.0f;
-			}
-			float lingered = g_time - g_lingerSince;
-			if (g_menuSince >= 0.0f && g_time - g_menuSince > 3.0f) lingered = std::max(lingered, 15.0f);
-			return lingered;
-		}
-
-		// The area a follower keeps around the player (placement only applies to Close following).
-		Driver::Order FormationOrder(int a_mode)
+		// The area a follower keeps: anywhere around the player, close by.
+		Driver::Order FormationOrder()
 		{
 			Driver::Order order;
 			order.kind = Driver::Kind::kFormation;
-			int placement = a_mode == 0 ? std::clamp(Settings::Get().placement, 0, 3) : 3;
-			float scale = a_mode == 0 ? 1.0f : 1.8f;  // medium: around the player, further out
-			switch (placement) {
-			case 3:  // anywhere around the player
-				order.zoneAngle = 180.0f;
-				order.zoneHalf = 180.0f;
-				order.zoneNear = 120.0f * scale;
-				order.zoneFar = 330.0f * scale;
-				break;
-			case 1:  // either side
-				order.zoneAngle = 90.0f;
-				order.zoneHalf = 35.0f;
-				order.zoneNear = 120.0f * scale;
-				order.zoneFar = 350.0f * scale;
-				order.zoneMirror = true;
-				break;
-			case 2:  // ahead
-				order.zoneAngle = 0.0f;
-				order.zoneHalf = 30.0f;
-				order.zoneNear = 180.0f * scale;
-				order.zoneFar = 400.0f * scale;
-				break;
-			default:  // behind
-				order.zoneAngle = 180.0f;
-				order.zoneHalf = 40.0f;
-				order.zoneNear = 120.0f * scale;
-				order.zoneFar = 320.0f * scale;
-				break;
-			}
+			order.zoneAngle = 180.0f;
+			order.zoneHalf = 180.0f;
+			order.zoneNear = 120.0f;
+			order.zoneFar = 330.0f;
 			return order;
 		}
 
@@ -1344,7 +1259,7 @@ namespace Followers
 			auto  player = a_scan.player;
 			auto& s = g_state[f->GetFormID()];
 			Tactics::Apply(f);
-			int   mode = std::clamp(cfg.followDistance, 0, 2);
+			constexpr int mode = 0;  // close following
 			int   combatMode = std::clamp(cfg.combatDistance + (g_time < s.healedUntil ? 1 : 0), 0, 2);
 			auto& tune = kTuning[mode];
 			float leash = kTuning[combatMode].combatLeash;
@@ -1372,36 +1287,14 @@ namespace Followers
 				Debug(std::format("{} stops tagging along", Name(f)));
 			}
 
-			// ---- relax in safe places: while the player lingers (sheathed, Medium/Far following), the
-			// follower is put on "wait" (the game's own sandboxing: wander, sit, use furniture) until the
-			// player walks off, draws a weapon or leaves.
 			{
-				bool safe = InSafePlace(player);
-				bool drawn = player->AsActorState()->IsWeaponDrawn();
-				if (drawn) g_lastDrawn = g_time;
-				float needLinger = g_time - g_lastDrawn < 60.0f ? 30.0f : 15.0f;  // weapons were out: wait longer
-				bool relax = cfg.sandbox && cfg.outsideMovement && safe && !drawn && mode != 0 && !inCombat && !player->IsInCombat() &&
-				             g_lingerSeconds >= needLinger && sameSpace;
-				if (safe != g_lastSafe) {
-					g_lastSafe = safe;
-					auto loc = player->GetCurrentLocation();
-					logger::info("safe place: {} ({})", safe ? "yes" : "no", loc ? loc->GetName() : "no location");
-				}
-				if (relax && !s.sandboxing && f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kWaitingForPlayer) <= 0.0f) {
-					if (s.formationDrive) Driver::Stop(f);
-					SetMod(f, s, RE::ActorValue::kWaitingForPlayer, 1.0f);
-					s.sandboxing = true;
-					f->EvaluatePackage(true, false);
-					Debug(std::format("{} relaxes", Name(f)));
-				} else if (s.sandboxing && !relax) {
+				// undo the old "relax" wait from earlier versions
+				if (s.avMods.contains(RE::ActorValue::kWaitingForPlayer)) {
 					SetMod(f, s, RE::ActorValue::kWaitingForPlayer, 0.0f);
-					s.sandboxing = false;
 					f->EvaluatePackage(true, false);
-					Debug(std::format("{} follows again", Name(f)));
 				}
-				if (s.sandboxing) return;
-				// formation looseness: drawn weapon outside = tight; sheathed = looser; safe places = loosest
-				s.looseness = drawn ? 1.0f : (safe ? 2.0f : 1.4f);
+				// formation looseness: weapon drawn = tight; sheathed = more relaxed
+				s.looseness = player->AsActorState()->IsWeaponDrawn() ? 1.0f : 1.4f;
 				if (s.formationDrive) Driver::SetLooseness(f, s.looseness);
 
 				// a follower left in another area (a door the player went through) is brought over
@@ -1477,7 +1370,7 @@ namespace Followers
 				} else if (!s.pathNoted) {
 					s.blockedCount = 0;
 				}
-				Driver::Order order = FormationOrder(mode);
+				Driver::Order order = FormationOrder();
 				order.target = player->GetHandle();
 				RE::NiPoint3 nearest;
 				float        gap = Driver::ZoneGap(order, f, player, &nearest);
@@ -1713,7 +1606,7 @@ namespace Followers
 							moved = TryHop(f, s, player) || RunTrail(f, s, player, nullptr, "to you");
 						}
 						if (!moved) {
-							Driver::Order order = FormationOrder(0);
+							Driver::Order order = FormationOrder();
 							order.target = player->GetHandle();
 							order.speed = Tuning::Get().chargeSpeed;
 							order.sprintSpeed = 715.0f;
@@ -1834,7 +1727,6 @@ namespace Followers
 			if (Settings::Get().awareness) UpdateWatch(scan);
 			UpdateRetreat(scan);
 
-			g_lingerSeconds = PlayerLingering(a_player);
 			RecordTrail(a_player);
 			int slot = 0;
 			for (auto f : scan.followers) {

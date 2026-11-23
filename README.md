@@ -6,21 +6,12 @@ Work in progress.
 ## Planned features
 
 **Keeping up**
-- Separate follow distance (out of combat) and combat distance: *Close*, *Medium* or *Far*.
-  - *Close*: followers stay within interaction range and start moving the moment you do.
-  - *Medium*: a looser follow.
-  - *Far*: the game's own follow behaviour.
-- Placement for Close following: behind you, at your side, or ahead of you (off to the side, out
-  of your line of sight).
-- The exact spot next to you is kept only when the follower is close with a clear line to it;
-  otherwise the game's own pathfinding brings them back (round fences and rocks, facing forward).
+- Out of combat, followers stay close, anywhere around you, and start moving the moment you do.
+  Tightest with your weapon drawn, a bit more relaxed with it sheathed.
+- Combat distance: *Close*, *Medium* or *Far*.
 - A follower stuck below a rock you are on, above a drop you went down, or at a fence jumps:
   up, down or over, with the game's own jump animations.
-- How close they keep depends on the moment: tightest with weapons drawn, looser with weapons
-  sheathed, loosest in cities, towns, inns and your homes. Turning on the spot, strafing or
-  backpedalling doesn't send them running round you.
-- In safe places, when you stay put for a while or are busy talking or crafting, followers relax:
-  they wander off to sit, lean and use furniture, and come back when you move on.
+- Turning on the spot, strafing or backpedalling doesn't send them running round you.
 - When the game's pathfinding can't get a follower to you or to an enemy (an archer up a tower,
   a ledge above), they take the route you walked: up the same stairs, through the same gaps.
   If there is no such route yet, a melee follower sticks close to you instead of hiding, until

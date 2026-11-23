@@ -3,23 +3,13 @@
 // All user settings. Stored in Data/SKSE/Plugins/FollowersWithBrains.ini and edited from the MCM.
 namespace Settings
 {
-	enum class FollowDistance : int
-	{
-		kClose = 0,
-		kMedium = 1,
-		kFar = 2
-	};
-
 	struct Values
 	{
 		// Movement
 		bool combatMovement = true;   // the mod moves followers in combat (charges, dodges, leash, retreat, routes)
-		bool outsideMovement = true;  // the mod moves followers out of combat (formation, catch-up, hops, relaxing)
-		int  followDistance = 0;  // out of combat
+		bool outsideMovement = true;  // the mod moves followers out of combat (close following, catch-up, hops)
 		int  combatDistance = 0;  // how far from the player followers fight
-		int  placement = 0;       // close following: 0 behind, 1 at the side, 2 ahead, 3 anywhere around
 		bool catchUp = true;
-		bool sandbox = true;      // relax (wander, sit, use furniture) in safe places while the player lingers
 		bool teleport = true;
 		bool combatLeash = true;
 

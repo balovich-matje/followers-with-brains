@@ -2,10 +2,7 @@ Scriptname FWB_MCM extends SKI_ConfigBase
 {Settings menu for Followers With Brains. Values live in the SKSE plugin (FWB_Native).}
 
 String[] _distanceNames
-String[] _placementNames
 Int _combatDistanceOID
-Int _followDistanceOID
-Int _placementOID
 Int _retreatDistanceOID
 
 String[] _toggleKeys
@@ -14,7 +11,7 @@ String[] _toggleInfo
 Int[] _toggleOIDs
 
 Int Function GetVersion()
-	Return 7
+	Return 8
 EndFunction
 
 Event OnVersionUpdate(Int a_version)
@@ -32,18 +29,13 @@ Event OnConfigInit()
 	_distanceNames[1] = "Medium"
 	_distanceNames[2] = "Far"
 
-	_placementNames = new String[4]
-	_placementNames[0] = "Behind you"
-	_placementNames[1] = "At your side"
-	_placementNames[2] = "Ahead of you"
-	_placementNames[3] = "Around you"
 
 	_toggleKeys = new String[12]
 	_toggleNames = new String[12]
 	_toggleInfo = new String[12]
 	_toggleOIDs = new Int[12]
 	SetToggle(0, "CombatMovement", "Control movement in combat", "The mod moves followers around in fights: charging shooters, keeping to the combat distance, retreating with you and taking your route to enemies the game can't path to. Off: the game's own combat movement. Reflexes (dodging big hits) work either way.")
-	SetToggle(1, "OutsideMovement", "Control movement out of combat", "The mod moves followers outside fights: keeping to the following distance and formation, catching up, jumping after you, taking your route and relaxing in safe places. Off: the game's own following.")
+	SetToggle(1, "OutsideMovement", "Control movement out of combat", "The mod moves followers outside fights: staying close around you (tighter with your weapon drawn), catching up, jumping after you and taking your route. Off: the game's own following.")
 	SetToggle(2, "Awareness", "Combat awareness", "Followers get ready when you aim at or watch an enemy, attack the moment you do, and join fights you are in.")
 	SetToggle(3, "Retarget", "Next target right away", "When their target dies, followers move straight on to the next enemy fighting you.")
 	SetToggle(4, "FocusSummoners", "Focus summoners", "Followers go for the summoner instead of the summon when they can reach them. If the summon keeps hitting them, they fight it.")
@@ -85,7 +77,7 @@ Int Function FlagIf(Bool abEnabled)
 EndFunction
 
 Event OnPageReset(String a_page)
-	If !_toggleKeys || _toggleKeys.Length != 12 || !_placementNames
+	If !_toggleKeys || _toggleKeys.Length != 12
 		OnConfigInit()
 	EndIf
 	SetCursorFillMode(TOP_TO_BOTTOM)
@@ -95,8 +87,6 @@ Event OnPageReset(String a_page)
 		i += 1
 	EndWhile
 	_combatDistanceOID = -1
-	_followDistanceOID = -1
-	_placementOID = -1
 	_retreatDistanceOID = -1
 
 	If a_page == "Combat"
@@ -118,15 +108,11 @@ Event OnPageReset(String a_page)
 		AddToggle(11)
 	Else
 		Bool combat = FWB_Native.GetInt("CombatMovement") != 0
-		Bool outside = FWB_Native.GetInt("OutsideMovement") != 0
-		Int follow = FWB_Native.GetInt("FollowDistance")
 		AddHeaderOption("In combat")
 		AddToggle(0)
 		_combatDistanceOID = AddMenuOption("Combat distance", _distanceNames[FWB_Native.GetInt("CombatDistance")], FlagIf(combat))
 		AddHeaderOption("Out of combat")
 		AddToggle(1)
-		_followDistanceOID = AddMenuOption("Following distance", _distanceNames[follow], FlagIf(outside))
-		_placementOID = AddMenuOption("Formation", _placementNames[FWB_Native.GetInt("Placement")], FlagIf(outside && follow == 0))
 	EndIf
 EndEvent
 
@@ -148,14 +134,6 @@ Event OnOptionMenuOpen(Int a_option)
 		SetMenuDialogOptions(_distanceNames)
 		SetMenuDialogStartIndex(FWB_Native.GetInt("CombatDistance"))
 		SetMenuDialogDefaultIndex(0)
-	ElseIf a_option == _followDistanceOID
-		SetMenuDialogOptions(_distanceNames)
-		SetMenuDialogStartIndex(FWB_Native.GetInt("FollowDistance"))
-		SetMenuDialogDefaultIndex(0)
-	ElseIf a_option == _placementOID
-		SetMenuDialogOptions(_placementNames)
-		SetMenuDialogStartIndex(FWB_Native.GetInt("Placement"))
-		SetMenuDialogDefaultIndex(0)
 	EndIf
 EndEvent
 
@@ -167,14 +145,6 @@ Event OnOptionMenuAccept(Int a_option, Int a_index)
 		FWB_Native.SetInt("CombatDistance", a_index)
 		FWB_Native.Save()
 		SetMenuOptionValue(a_option, _distanceNames[a_index])
-	ElseIf a_option == _followDistanceOID
-		FWB_Native.SetInt("FollowDistance", a_index)
-		FWB_Native.Save()
-		ForcePageReset()
-	ElseIf a_option == _placementOID
-		FWB_Native.SetInt("Placement", a_index)
-		FWB_Native.Save()
-		SetMenuOptionValue(a_option, _placementNames[a_index])
 	EndIf
 EndEvent
 
@@ -201,10 +171,6 @@ Event OnOptionHighlight(Int a_option)
 		SetInfoText(_toggleInfo[i])
 	ElseIf a_option == _combatDistanceOID
 		SetInfoText("How far from you followers fight. While they are above half health or being healed they may go much further.")
-	ElseIf a_option == _followDistanceOID
-		SetInfoText("Close: followers stay right by you and move the moment you do.\nMedium: around you, further out.\nFar: the game's own follow distance.")
-	ElseIf a_option == _placementOID
-		SetInfoText("Where followers stay with Close following: behind you, at your side, ahead of you, or anywhere around you. Each is an area, not a fixed spot.")
 	ElseIf a_option == _retreatDistanceOID
 		SetInfoText("While you retreat, a ranged follower closer to you than this keeps fighting as it backs off. Farther away, it just runs to you.")
 	EndIf
