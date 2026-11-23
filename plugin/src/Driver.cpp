@@ -277,7 +277,10 @@ namespace Driver
 
 			if (auto slot = ClaimSlot(reinterpret_cast<std::uintptr_t>(a))) {
 				slot->speed.store(d.order.speed, std::memory_order_relaxed);
-				slot->direction.store(Wrap(Heading(move) - heading), std::memory_order_relaxed);
+				// the channel counts in turns, 0..1 (0 = forward, 0.5 = backward), not radians
+				float turns = Wrap(Heading(move) - heading) / 6.2831853f;
+				if (turns < 0.0f) turns += 1.0f;
+				slot->direction.store(turns, std::memory_order_relaxed);
 				slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			}
 			if (!d.moveSent) {
