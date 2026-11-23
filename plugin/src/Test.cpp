@@ -98,6 +98,7 @@ namespace Test
 		float g_idleNearTime = 0.0f;    // in combat, enemy within 700, not moving and not attacking
 
 		RE::NiPoint3 g_lastPos;
+		float        g_idleWindow = 0.0f;
 
 		std::string Trim(std::string_view a_text)
 		{
@@ -261,10 +262,16 @@ namespace Test
 			bool near = nearest && nearestDist < 700.0f;
 			if (kind == 1) (near ? g_meleeNearTime : g_meleeFarTime) += a_delta;
 			if (kind == 2) (near ? g_rangedNearTime : g_rangedFarTime) += a_delta;
-			float moved = f->GetPosition().GetDistance(g_lastPos);
-			g_lastPos = f->GetPosition();
-			bool attacking = f->AsActorState()->GetAttackState() != RE::ATTACK_STATE_ENUM::kNone;
-			if (near && f->IsInCombat() && moved < 5.0f && !attacking) g_idleNearTime += a_delta;
+			// idle = barely moved over half a second, with no attack and no block going on
+			g_idleWindow += a_delta;
+			if (g_idleWindow >= 0.5f) {
+				float moved = f->GetPosition().GetDistance(g_lastPos);
+				g_lastPos = f->GetPosition();
+				auto  state = f->AsActorState();
+				bool  busy = state->GetAttackState() != RE::ATTACK_STATE_ENUM::kNone || f->IsBlocking();
+				if (near && f->IsInCombat() && moved < 30.0f && !busy) g_idleNearTime += g_idleWindow;
+				g_idleWindow = 0.0f;
+			}
 
 			auto targetPtr = f->GetActorRuntimeData().currentCombatTarget.get();
 			auto target = targetPtr.get();
