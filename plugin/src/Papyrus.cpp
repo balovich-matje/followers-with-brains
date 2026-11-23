@@ -37,9 +37,9 @@ namespace Papyrus
 
 	void StartCombat(RE::Actor* a_actor, RE::Actor* a_target) { Call("StartCombat"sv, a_actor, a_target); }
 	void StopCombat(RE::Actor* a_actor) { Call("StopCombat"sv, a_actor); }
-	void KeepOffset(RE::Actor* a_actor, RE::Actor* a_target, float a_x, float a_y, float a_catchUp, float a_follow)
+	void KeepOffset(RE::Actor* a_actor, RE::Actor* a_target, float a_x, float a_y, float a_catchUp, float a_follow, float a_angle)
 	{
-		Call("KeepOffset"sv, a_actor, a_target, a_x, a_y, a_catchUp, a_follow);
+		Call("KeepOffset"sv, a_actor, a_target, a_x, a_y, a_catchUp, a_follow, a_angle);
 	}
 	void ClearOffset(RE::Actor* a_actor) { Call("ClearOffset"sv, a_actor); }
 	void MoveTo(RE::Actor* a_actor, RE::Actor* a_target, float a_x, float a_y) { Call("MoveTo"sv, a_actor, a_target, a_x, a_y); }

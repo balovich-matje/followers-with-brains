@@ -742,7 +742,7 @@ namespace Followers
 					if (auto weap = e->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
 						reach = std::max(150.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
 					}
-					Papyrus::KeepOffset(f, e, 0.0f, reach + 150.0f, 30.0f, 10.0f);
+					Papyrus::KeepOffset(f, e, 0.0f, reach + 150.0f, 30.0f, 10.0f, 180.0f);
 					r.offset = true;
 					r.action = 1;
 					r.until = g_time + (power ? 0.9f : 0.6f);
@@ -784,7 +784,7 @@ namespace Followers
 					auto e = Get(r.against);
 					EndReflex(f, r);
 					if (Alive(e)) {
-						Papyrus::KeepOffset(f, e, 0.0f, 400.0f, 30.0f, 10.0f);
+						Papyrus::KeepOffset(f, e, 0.0f, 400.0f, 30.0f, 10.0f, 180.0f);
 						r.offset = true;
 						r.action = 1;
 						r.until = g_time + 0.7f;
@@ -933,7 +933,7 @@ namespace Followers
 				z.nextFlip = g_time + 0.7f + static_cast<float>(std::rand() % 50) / 100.0f;
 				// a point ~500 units further along, ~300 to the side (target-local: +y is toward us)
 				float ahead = std::max(kChargeEnd - 100.0f, d - 500.0f);
-				Papyrus::KeepOffset(f, target, static_cast<float>(z.side) * 300.0f, ahead, 60.0f, 30.0f);
+				Papyrus::KeepOffset(f, target, static_cast<float>(z.side) * 300.0f, ahead, 60.0f, 30.0f, 180.0f);
 			}
 			return true;
 		}

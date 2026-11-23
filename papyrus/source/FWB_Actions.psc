@@ -13,9 +13,10 @@ Function StopCombat(Actor akActor) Global
 	EndIf
 EndFunction
 
-Function KeepOffset(Actor akActor, Actor akTarget, Float afX, Float afY, Float afCatchUp, Float afFollow) Global
+Function KeepOffset(Actor akActor, Actor akTarget, Float afX, Float afY, Float afCatchUp, Float afFollow, Float afAngleZ) Global
+	{afAngleZ: facing relative to the target's, in degrees (180 = face the target when in front of it)}
 	If akActor && akTarget
-		akActor.KeepOffsetFromActor(akTarget, afX, afY, 0.0, 0.0, 0.0, 0.0, afCatchUp, afFollow)
+		akActor.KeepOffsetFromActor(akTarget, afX, afY, 0.0, 0.0, 0.0, afAngleZ, afCatchUp, afFollow)
 	EndIf
 EndFunction
 
