@@ -35,6 +35,7 @@ namespace Test
 			std::string scenario = "mixed";
 			int         runs = 3;
 			float       duration = 60.0f;
+			float       enemyHealth = 1500.0f;  // extra health for spawned enemies, so fights last
 		} g_cfg;
 
 		enum class Phase
@@ -44,6 +45,7 @@ namespace Test
 			kLoading,
 			kSettle,
 			kRunning,
+			kCooldown,
 			kDone
 		};
 
@@ -123,6 +125,7 @@ namespace Test
 				else if (key == "Scenario") g_cfg.scenario = value;
 				else if (key == "Runs") g_cfg.runs = std::max(1, std::atoi(value.c_str()));
 				else if (key == "Duration") g_cfg.duration = static_cast<float>(std::atof(value.c_str()));
+				else if (key == "EnemyHealth") g_cfg.enemyHealth = static_cast<float>(std::atof(value.c_str()));
 			}
 		}
 
@@ -170,7 +173,8 @@ namespace Test
 			auto player = RE::PlayerCharacter::GetSingleton();
 			auto follower = FirstFollower();
 			logger::info("[test] run {} start, follower {}", g_run + 1, Name(follower));
-			Console("tgm");  // keep the player alive; the follower is left as is
+			Console("tgm");               // keep the player alive; the follower is left as is
+			Console("set KillMove to 0");  // kill animations would end a fight before anything happens
 			g_spawned.clear();
 			g_placements.clear();
 			g_relocated = 0;
@@ -183,6 +187,7 @@ namespace Test
 				if (!actor) continue;
 				Placement place{ std::sqrt(spawn.forward * spawn.forward + spawn.side * spawn.side), std::atan2(spawn.side, spawn.forward) };
 				Place(actor, place);
+				actor->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, g_cfg.enemyHealth);
 				Papyrus::StartCombat(actor, player);
 				g_spawned.push_back(actor->GetHandle());
 				g_placements.push_back(place);
@@ -235,7 +240,8 @@ namespace Test
 				g_phase = Phase::kDone;
 				g_timer = 0.0f;
 			} else {
-				LoadSave();
+				g_phase = Phase::kCooldown;  // let death and dismemberment work finish before reloading
+				g_timer = 0.0f;
 			}
 		}
 
@@ -351,6 +357,9 @@ namespace Test
 			} else if (auto f = FirstFollower(); !f) {
 				EndRun("no follower");
 			}
+			break;
+		case Phase::kCooldown:
+			if (g_timer > 4.0f) LoadSave();
 			break;
 		case Phase::kDone:
 			if (g_timer > 1.0f) {
