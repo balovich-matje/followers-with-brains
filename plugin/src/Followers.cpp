@@ -119,6 +119,21 @@ namespace Followers
 			float      amount;
 		};
 		std::vector<DamageRecord> g_damage;  // filled by the health damage hook, read in RunLogic
+
+		// Weapon kind each follower should fight with (1 melee, 2 ranged). Read by the combat AI hook,
+		// which can run on worker threads.
+		std::mutex                                 g_prefLock;
+		std::unordered_map<RE::FormID, int>        g_weaponPref;
+
+		void SetWeaponPref(RE::Actor* a, int a_pref)
+		{
+			std::scoped_lock lock{ g_prefLock };
+			if (a_pref == 0) {
+				g_weaponPref.erase(a->GetFormID());
+			} else {
+				g_weaponPref[a->GetFormID()] = a_pref;
+			}
+		}
 		int g_lastPlayerRanged = -1;
 
 		float g_time = 0.0f;
@@ -639,6 +654,7 @@ namespace Followers
 			bool ranged = IsRanged(f);
 
 			if (a_retreating) {
+				SetWeaponPref(f, 2);
 				if (!ranged) Swap(f, s, true, "covering the retreat");
 				return;
 			}
@@ -646,20 +662,24 @@ namespace Followers
 			float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
 			if (options.PrefersRanged(bias)) {
 				// archer/mage: keep shooting, melee only when an enemy is in their face
-				if (ranged && d < 300.0f) {
-					Swap(f, s, false, "enemy in their face");
-				} else if (!ranged && d > 600.0f) {
-					Swap(f, s, true, "back to range");
+				if (d < 300.0f) {
+					SetWeaponPref(f, 1);
+					if (ranged) Swap(f, s, false, "enemy in their face");
+				} else if (d > 600.0f) {
+					SetWeaponPref(f, 2);
+					if (!ranged) Swap(f, s, true, "back to range");
 				}
 			} else {
 				// fighter: charge. Shoot only at what they can't reach, or what is too far from the player to chase.
 				auto  player = RE::PlayerCharacter::GetSingleton();
 				float leash = kTuning[std::clamp(cfg.combatDistance, 0, 2)].combatLeash;
 				bool  cantChase = (cfg.combatLeash && Dist(a_target, player) > leash) || g_time < s.unreachableUntil;
-				if (ranged && !cantChase) {
-					Swap(f, s, false, "charging");
-				} else if (!ranged && cantChase && d > 600.0f) {
-					Swap(f, s, true, "can't reach, shooting");
+				if (!cantChase || d < 600.0f) {
+					SetWeaponPref(f, 1);
+					if (ranged) Swap(f, s, false, "charging");
+				} else {
+					SetWeaponPref(f, 2);
+					if (!ranged) Swap(f, s, true, "can't reach, shooting");
 				}
 			}
 		}
@@ -751,6 +771,7 @@ namespace Followers
 				}
 			}
 
+			if (!inCombat) SetWeaponPref(f, 0);
 			if (!inCombat || recalling) {
 				s.missedSwings = 0;
 				s.stuckSince = -1.0f;
@@ -912,6 +933,29 @@ namespace Followers
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// The combat AI rates every weapon a fighter carries and draws the best. Tilt that rating toward
+		// the kind this mod chose, so the AI draws it itself instead of undoing our choice.
+		template <int Kind>  // 1 melee, 2 ranged
+		struct ItemScore
+		{
+			static float thunk(RE::CombatInventoryItem* a_item, RE::CombatController* a_controller)
+			{
+				float score = func(a_item, a_controller);
+				if (!a_controller) return score;
+				auto attacker = a_controller->attackerHandle.get();
+				if (!attacker) return score;
+				int pref = 0;
+				{
+					std::scoped_lock lock{ g_prefLock };
+					auto it = g_weaponPref.find(attacker->GetFormID());
+					if (it == g_weaponPref.end()) return score;
+					pref = it->second;
+				}
+				return pref == Kind ? score * 10.0f + 10.0f : score * 0.05f;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct HealthDamage
 		{
 			static void thunk(RE::Actor* a_victim, RE::Actor* a_attacker, float a_damage)
@@ -997,6 +1041,10 @@ namespace Followers
 		PlayerUpdate::func = vtbl.write_vfunc(0xAD, PlayerUpdate::thunk);
 		REL::Relocation<std::uintptr_t> characterVtbl{ RE::VTABLE_Character[0] };
 		HealthDamage::func = characterVtbl.write_vfunc(0x104, HealthDamage::thunk);
+		REL::Relocation<std::uintptr_t> meleeVtbl{ RE::VTABLE_CombatInventoryItemMelee[0] };
+		ItemScore<1>::func = meleeVtbl.write_vfunc(0x0C, ItemScore<1>::thunk);
+		REL::Relocation<std::uintptr_t> rangedVtbl{ RE::VTABLE_CombatInventoryItemRanged[0] };
+		ItemScore<2>::func = rangedVtbl.write_vfunc(0x0C, ItemScore<2>::thunk);
 
 		auto holder = RE::ScriptEventSourceHolder::GetSingleton();
 		holder->AddEventSink<RE::TESHitEvent>(Sink::Get());
@@ -1018,6 +1066,10 @@ namespace Followers
 		g_retreating = false;
 		g_marked = {};
 		g_watchTarget = {};
+		{
+			std::scoped_lock lock{ g_prefLock };
+			g_weaponPref.clear();
+		}
 
 		// undo temporary changes that were saved into this game
 		for (auto& [id, av, amount] : g_pendingUndo) {
