@@ -118,6 +118,7 @@ namespace Followers
 		{
 			kPlayerAttack,  // swing / bow release / offensive spell
 			kPlayerHeal,  // b = healed follower (may be empty)
+			kPlayerCast,
 			kFollowerSwing,
 			kHit,
 			kDeath
@@ -181,6 +182,8 @@ namespace Followers
 		float g_logicTimer = 0.0f;
 		float g_lastPlayerAttack = -100.0f;
 		float g_lastHeal = -100.0f;
+		float g_lastPlayerCast = -100.0f;
+		float g_sprintSince = -1.0f;
 
 		RE::ActorHandle g_watchTarget;
 		float           g_watchTime = 0.0f;
@@ -759,7 +762,13 @@ namespace Followers
 			float nearest = std::numeric_limits<float>::max();
 			for (auto e : a_scan.enemies) nearest = std::min(nearest, Dist(e, player));
 			g_samples.push_back({ g_time, nearest, player->GetPosition() });
-			while (!g_samples.empty() && g_time - g_samples.front().time > 3.0f) g_samples.pop_front();
+			while (!g_samples.empty() && g_time - g_samples.front().time > 7.0f) g_samples.pop_front();
+			// a retreat is a sustained sprint: track how long the player has sprinted without a break
+			if (player->AsActorState()->IsSprinting()) {
+				if (g_sprintSince < 0.0f) g_sprintSince = g_time;
+			} else {
+				g_sprintSince = -1.0f;
+			}
 
 			auto sampleAgo = [&](float a_seconds) -> const Sample* {
 				for (auto& s : g_samples) {
@@ -773,13 +782,17 @@ namespace Followers
 
 			if (!g_retreating) {
 				bool  sprint = player->AsActorState()->IsSprinting();
-				auto  old = sampleAgo(sprint ? 1.2f : 2.0f);
-				if (!old || g_time - old->time < (sprint ? 1.0f : 1.8f)) return;
+				// A retreat needs all of: sprinting for 5 s without a break, the nearest enemy further away
+				// than 5 s ago, and no attack or spell from the player in those 5 s. Running circles round
+				// an enemy is not a retreat.
+				(void)sprint;
+				bool  sprintedLong = g_sprintSince >= 0.0f && g_time - g_sprintSince >= 5.0f;
+				auto  old = sampleAgo(5.0f);
+				if (!sprintedLong || !old || g_time - old->time < 4.8f) return;
 				float gained = nearest - old->enemyDistance;
 				float moved = now.GetDistance(old->playerPos);
-				bool  attacking = g_time - g_lastPlayerAttack < 3.0f;
-				// a real retreat: well away from every enemy, moving steadily, not fighting
-				if (gained > 350.0f && moved > 450.0f && nearest > 600.0f && !attacking && !healing) {
+				bool  acted = g_time - g_lastPlayerAttack < 5.0f || g_time - g_lastHeal < 5.0f || g_time - g_lastPlayerCast < 5.0f;
+				if (gained > 0.0f && !acted) {
 					g_retreating = true;
 					g_retreatStart = g_time;
 					Debug(std::format("Retreat! (gained {:.0f}, moved {:.0f})", gained, moved));
@@ -809,6 +822,10 @@ namespace Followers
 				if (cfg.awareness) {
 					if (auto target = AttackTarget(player)) EngageAll(a_scan, target, "you attacked");
 				}
+				break;
+
+			case EventType::kPlayerCast:
+				g_lastPlayerCast = g_time;
 				break;
 
 			case EventType::kPlayerHeal:
@@ -1246,6 +1263,13 @@ namespace Followers
 			int   combatMode = std::clamp(cfg.combatDistance + (g_time < s.healedUntil ? 1 : 0), 0, 2);
 			auto& tune = kTuning[mode];
 			float leash = kTuning[combatMode].combatLeash;
+			{
+				// healthy (over half health) or being healed: she keeps to her fight, wherever it goes
+				auto  avo = f->AsActorValueOwner();
+				float maxHealth = avo->GetPermanentActorValue(RE::ActorValue::kHealth);
+				bool  healthy = maxHealth > 0.0f && avo->GetActorValue(RE::ActorValue::kHealth) > maxHealth * 0.5f;
+				if (healthy || g_time < s.healedUntil) leash = std::max(leash, 6000.0f);
+			}
 			float dist = Dist(f, player);
 			bool  engaging = g_time < s.engagingUntil;
 			bool  inCombat = f->IsInCombat() || engaging;
@@ -1765,7 +1789,8 @@ namespace Followers
 
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESMagicEffectApplyEvent* a_event, RE::BSTEventSource<RE::TESMagicEffectApplyEvent>*) override
 			{
-				if (a_event && a_event->caster && a_event->caster->IsPlayerRef() && IsHealingEffect(a_event->magicEffect)) {
+				auto casterActor = a_event && a_event->caster ? a_event->caster->As<RE::Actor>() : nullptr;
+				if (casterActor && (casterActor->IsPlayerRef() || casterActor->IsPlayerTeammate()) && IsHealingEffect(a_event->magicEffect)) {
 					Queue(EventType::kPlayerHeal, {}, HandleOf(a_event->target.get()));
 				}
 				return RE::BSEventNotifyControl::kContinue;
@@ -1777,6 +1802,9 @@ namespace Followers
 				using T = SKSE::ActionEvent::Type;
 				auto type = a_event->type.get();
 				if (a_event->actor->IsPlayerRef()) {
+					if (type == T::kSpellCast || type == T::kSpellFire || type == T::kVoiceCast) {
+						Queue(EventType::kPlayerCast, {});
+					}
 					if (type == T::kSpellCast || type == T::kSpellFire) {
 						if (IsHealingSpell(a_event->sourceForm)) {
 							Queue(EventType::kPlayerHeal, {});
