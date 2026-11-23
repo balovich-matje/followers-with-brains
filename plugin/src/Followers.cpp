@@ -856,38 +856,84 @@ namespace Followers
 			}
 		}
 
-		// ------------------------------------------------------------------ zig-zag toward shooters
+		// ------------------------------------------------------------------ charging shooters
+		// In combat the game's AI walks a melee follower at an archer while facing it, which ignores
+		// any movement we ask for. So for the run-up the follower leaves combat, runs a weaving path
+		// toward the shooter (faster than usual, like a sprint), and re-enters combat once close.
 		struct ZigState
 		{
-			float nextFlip = 0.0f;
-			int   side = 1;
-			bool  active = false;
+			bool            active = false;
+			RE::ActorHandle target;
+			float           started = 0.0f;
+			float           nextFlip = 0.0f;
+			int             side = 1;
 		};
 		std::unordered_map<RE::FormID, ZigState> g_zig;
 
-		bool UpdateZigzag(RE::Actor* f, FollowerState& s, RE::Actor* a_target)
+		constexpr float kChargeEnd = 500.0f;     // re-enter combat this close
+		constexpr float kChargeStart = 700.0f;   // only worth it from this far
+		constexpr float kSprintReach = 1100.0f;  // about two seconds of sprinting
+
+		void EndCharge(RE::Actor* f, FollowerState& s, ZigState& z, bool a_attack)
 		{
+			auto target = Get(z.target);
+			Papyrus::ClearOffset(f);
+			s.offsetMode = -1;
+			s.offsetSlot = -1;
+			SetBoost(f, s, 0.0f);
+			z.active = false;
+			if (a_attack && Alive(target)) {
+				s.lastRetarget = g_time;
+				s.engagingUntil = g_time + 2.0f;
+				Papyrus::StartCombat(f, target);
+			}
+		}
+
+		// Returns true while the follower is charging (the rest of the per-follower logic is skipped).
+		bool UpdateCharge(RE::Actor* f, FollowerState& s)
+		{
+			auto& cfg = Settings::Get();
 			auto& z = g_zig[f->GetFormID()];
 			auto& r = g_reflex[f->GetFormID()];
-			bool  want = Settings::Get().zigzag && a_target && !IsRanged(f) && IsRanged(a_target) && r.action == 0;
-			float d = want ? Dist(f, a_target) : 0.0f;
-			want = want && d > 450.0f && d < 3000.0f;
-			if (!want) {
-				if (z.active) {
-					Papyrus::ClearOffset(f);
-					s.offsetMode = -1;
-					s.offsetSlot = -1;
-					z.active = false;
-				}
+
+			if (!z.active) {
+				if (!cfg.zigzag || !f->IsInCombat() || r.action != 0 || g_retreating) return false;
+				auto target = CombatTarget(f);
+				if (!Alive(target) || !IsRanged(target)) return false;
+				float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
+				if (GetLoadout(f, s).PrefersRanged(bias)) return false;  // archers and mages don't charge
+				float d = Dist(f, target);
+				// Far: charge right away. Close/Medium: shoot first, charge from about two seconds away.
+				float startAt = cfg.combatDistance == 2 ? 4000.0f : kSprintReach;
+				if (d < kChargeStart || d > startAt) return false;
+				z.active = true;
+				z.target = target->GetHandle();
+				z.started = g_time;
+				z.nextFlip = 0.0f;
+				++g_stats.zigzags;
+				SetWeaponPref(f, 1);
+				Swap(f, s, false, "charging a shooter");
+				Debug(std::format("{} charges {}", Name(f), Name(target)));
+			}
+
+			auto  target = Get(z.target);
+			float d = Alive(target) ? Dist(f, target) : 0.0f;
+			if (!Alive(target) || d <= kChargeEnd || g_time - z.started > 15.0f || g_retreating) {
+				EndCharge(f, s, z, Alive(target) && !g_retreating);
 				return false;
 			}
-			if (!z.active || g_time >= z.nextFlip) {
+			if (f->IsInCombat() && g_time - s.lastStop > 0.4f) {
+				Papyrus::StopCombat(f);
+				s.lastStop = g_time;
+			}
+			if (!f->AsActorState()->IsWeaponDrawn()) f->DrawWeaponMagicHands(true);
+			SetBoost(f, s, 40.0f);
+			if (g_time >= z.nextFlip) {
 				z.side = -z.side;
-				z.nextFlip = g_time + 0.8f + static_cast<float>(std::rand() % 40) / 100.0f;
-				float ahead = std::max(250.0f, d - 450.0f);  // in front of the shooter, toward us
-				Papyrus::KeepOffset(f, a_target, static_cast<float>(z.side) * 260.0f, ahead, 40.0f, 20.0f);
-				if (!z.active) ++g_stats.zigzags;
-				z.active = true;
+				z.nextFlip = g_time + 0.7f + static_cast<float>(std::rand() % 50) / 100.0f;
+				// a point ~500 units further along, ~300 to the side (target-local: +y is toward us)
+				float ahead = std::max(kChargeEnd - 100.0f, d - 500.0f);
+				Papyrus::KeepOffset(f, target, static_cast<float>(z.side) * 300.0f, ahead, 60.0f, 30.0f);
 			}
 			return true;
 		}
@@ -938,6 +984,8 @@ namespace Followers
 				auto  player = RE::PlayerCharacter::GetSingleton();
 				float leash = kTuning[std::clamp(cfg.combatDistance, 0, 2)].combatLeash;
 				bool  cantChase = (cfg.combatLeash && Dist(a_target, player) > leash) || g_time < s.unreachableUntil;
+				// Close/Medium: trade a few shots with a far shooter before charging
+				if (cfg.combatDistance != 2 && IsRanged(a_target) && d > kSprintReach) cantChase = true;
 				if (!cantChase || d < 600.0f) {
 					SetWeaponPref(f, 1);
 					if (ranged) Swap(f, s, false, "charging");
@@ -984,6 +1032,8 @@ namespace Followers
 			} else {
 				SetFleeing(f, s, false);
 			}
+
+			if (!recalling && UpdateCharge(f, s)) return;
 
 			// ---- keep-offset follow
 			bool wantOffset = !busy && sameSpace && dist < 4000.0f &&
@@ -1075,7 +1125,6 @@ namespace Followers
 
 			// ---- ranged or melee
 			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
-			UpdateZigzag(f, s, target);
 
 			// ---- summons: go for the summoner when it can be reached
 			if (cfg.focusSummoners && target->IsCommandedActor() && g_time - s.lastRetarget > 1.0f) {
@@ -1358,7 +1407,7 @@ namespace Followers
 		g_reflex.clear();
 		g_enemyAttack.clear();
 		g_enemyStagger.clear();
-		g_zig.clear();
+		g_zig.clear();  // charges in progress are simply dropped
 		g_stats = {};
 		g_pendingCheck.clear();
 		{
