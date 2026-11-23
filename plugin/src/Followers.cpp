@@ -1593,10 +1593,9 @@ namespace Followers
 				if (attacker && Alive(attacker) && attacker != target && g_time - s.lastAttackedTime < 4.0f) {
 					StartCombat(f, s, attacker, "can't reach target, fighting attacker");
 				} else {
-					f->EvaluatePackage(true, false);
-					Papyrus::StartCombat(f, target);
-					s.engagingUntil = g_time + 2.0f;
-					Debug(std::format("{} can't reach {}, re-pathing", Name(f), Name(target)));
+					// Leave the game's pathfinding alone (resetting the AI threw its route away, e.g. up a
+					// tower's stairs): only note the target as out of reach, so a bow comes out if she has one.
+					s.unreachableUntil = g_time + 8.0f;
 				}
 			}
 		}
