@@ -41,7 +41,9 @@ Work in progress.
 
 ## Roadmap
 
-The goal: a follower that plays like a person, not like a script.
+The goal: a follower that plays like a person, not like a script, with a player's reflexes.
+Followers read the enemy's intent straight from the game (an attack starting, a bow being
+drawn) instead of waiting to see an animation, and react at once.
 
 **Positioning**
 - Bait archers: peek out to draw a shot from an archer without line of sight, then sprint in while
@@ -57,25 +59,25 @@ The goal: a follower that plays like a person, not like a script.
 - Ranged followers keep their distance from melee enemies and don't shoot through you.
 - Kiting: archers and mages use the terrain like a player does (get up on rocks, circle tables
   and pillars, hop a fence, hit and step back out of reach).
-- Strafe sideways when an enemy archer or caster is aiming at them.
+- Zig-zag when closing in on an archer or caster, so their shots miss.
 
 **Teamwork**
 - Focus fire: when you keep hitting the same enemy, followers help finish it.
 - Protect you: when you are low on health, melee followers go for whoever is hitting you.
 - Interrupt casters with a shield bash or a quick attack.
-- Bob and weave: bait a melee swing, step out of reach, step back in and land a hit. Step away
-  from power attacks.
-- Sneak volleys: while you sneak, a follower with a bow shoots your marked target the moment you
-  shoot.
-- Cover a downed (bleeding out) ally.
+
+**Reflexes**
+- The moment an enemy starts an attack, weigh it: how hard it will hit and whether it can be
+  interrupted. Then take it, bash it, block it, or step out of reach and punish.
+- Bob and weave: bait a melee swing, step out of reach, step back in and land a hit (optional).
+- Follow up instantly on openings, like a staggered or bashed enemy.
 - Regroup: a badly hurt follower falls back to you instead of fighting alone.
 - Stealth: while you sneak, followers sneak, keep further back and wait for your first shot.
 
 **Feeling alive**
-- Look where you aim, and at what you look at.
+- Look where you look while your weapon is drawn: right away when you sneak, more slowly when
+  you don't.
 - Keep watch facing outward while you loot or craft in dangerous places; relax in towns.
-- Hold doors: wait at a doorway until you are through instead of blocking it.
-- Light a torch in the dark when nobody has one.
 
 **Upkeep**
 - Use their own potions at sensible health thresholds.
