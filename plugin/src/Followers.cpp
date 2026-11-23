@@ -1,5 +1,6 @@
 #include "Followers.h"
 #include "Driver.h"
+#include "Recorder.h"
 #include "Loadout.h"
 #include "Papyrus.h"
 #include "Settings.h"
@@ -666,6 +667,7 @@ namespace Followers
 			float until = 0.0f;
 			float cooldownUntil = 0.0f;
 			float punishAt = -1.0f;
+			float dodgeReadyAt = 0.0f;
 			RE::ActorHandle against;
 			float bashTime = -100.0f;
 			bool  offset = false;
@@ -741,7 +743,7 @@ namespace Followers
 				r.bashTime = g_time;
 				++g_stats.bashes;
 				what = "bash";
-			} else if (power || share > 0.08f || health < f->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kHealth) * 0.5f) {
+			} else if ((power || share > 0.2f) && g_time >= r.dodgeReadyAt && (std::rand() % 100) < 75) {
 				if (!power && HasShield(f)) {
 					f->NotifyAnimationGraph("blockStart"sv);
 					r.action = 2;
@@ -757,13 +759,14 @@ namespace Followers
 					Driver::Order order;
 					order.kind = Driver::Kind::kStepBack;
 					order.target = e->GetHandle();
-					order.speed = 480.0f;
-					order.stopDistance = Dist(f, e) + reach * 0.6f + 120.0f;
+					order.speed = 300.0f;  // what a backpedal animation can keep up with
+					order.stopDistance = Dist(f, e) + reach * 0.5f + 80.0f;
 					order.duration = 1.8f;  // the drive ends when the swing is over
 					order.holdWhileAttacked = true;
 					Driver::Start(f, order);
 					r.action = 1;
 					r.until = g_time + 2.0f;
+					r.dodgeReadyAt = g_time + 2.5f;  // not every attack: a breather before the next dodge
 					++g_stats.stepOuts;
 					what = "step out";
 				}
@@ -848,7 +851,7 @@ namespace Followers
 						Driver::Order order;
 						order.kind = Driver::Kind::kRunTo;
 						order.target = e->GetHandle();
-						order.speed = 550.0f;
+						order.speed = 380.0f;
 						order.stopDistance = reach * 0.85f;
 						order.duration = 1.2f;
 						Driver::Start(f, order);
@@ -1391,6 +1394,7 @@ namespace Followers
 		REL::Relocation<std::uintptr_t> characterVtbl{ RE::VTABLE_Character[0] };
 		HealthDamage::func = characterVtbl.write_vfunc(0x104, HealthDamage::thunk);
 		Driver::Install();
+		Recorder::Install();
 		REL::Relocation<std::uintptr_t> meleeVtbl{ RE::VTABLE_CombatInventoryItemMelee[0] };
 		ItemScore<1>::func = meleeVtbl.write_vfunc(0x0C, ItemScore<1>::thunk);
 		ItemShouldEquip<1>::func = meleeVtbl.write_vfunc(0x0F, ItemShouldEquip<1>::thunk);
@@ -1445,6 +1449,7 @@ namespace Followers
 		g_time += a_delta;
 		g_logicTimer += a_delta;
 		Driver::Frame(a_delta);
+		Recorder::Frame(a_delta);
 		UpdateReflexes();
 		if (g_logicTimer < kLogicInterval) return;
 		g_logicTimer = 0.0f;

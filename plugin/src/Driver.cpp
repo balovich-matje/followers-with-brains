@@ -183,6 +183,7 @@ namespace Driver
 			auto id = a_actor->GetFormID();
 			if (a_drive.sprinting) {
 				a_actor->AsActorState()->actorState1.sprinting = 0;
+				a_actor->SetGraphVariableBool("IsSprinting", false);
 				a_actor->NotifyAnimationGraph("SprintStop"sv);
 			}
 			ReleaseSlot(reinterpret_cast<std::uintptr_t>(a_actor));
@@ -226,14 +227,15 @@ namespace Driver
 					if (dist <= d.order.stopDistance) return "arrived";
 					if (d.elapsed >= d.nextFlip) {
 						d.side = -d.side;
-						d.nextFlip = d.elapsed + 0.6f + static_cast<float>(std::rand() % 40) / 100.0f;
+						d.nextFlip = d.elapsed + 0.9f + static_cast<float>(std::rand() % 50) / 100.0f;
 					}
 					RE::NiPoint3 across{ -toDir.y, toDir.x, 0.0f };
-					// weave less as the target gets close
-					float        weave = std::min(1.0f, dist / 1200.0f) * 0.9f;
+					// a gentle weave (about 20 degrees off the line), less as the target gets close;
+					// the body faces where it runs, so the legs play a plain run, and turns at a run's rate
+					float        weave = std::min(1.0f, dist / 1200.0f) * 0.38f;
 					RE::NiPoint3 aim = toDir + across * (weave * static_cast<float>(d.side));
 					move = aim / aim.Length();
-					face = Heading(toDir);
+					face = Heading(move);
 					break;
 				}
 			case Kind::kStepBack:
@@ -264,7 +266,13 @@ namespace Driver
 				break;
 			}
 
-			float        dt = std::min(a_delta, 0.05f);
+			float dt = std::min(a_delta, 0.05f);
+			float turnRate = d.order.kind == Kind::kCharge ? 3.0f : 8.0f;  // radians per second
+			float heading = TurnToward(a->GetAngleZ(), face, turnRate * dt);
+			if (d.order.kind == Kind::kCharge) {
+				// run where the body faces, so a change of side is a curve, not a sideways slide
+				move = RE::NiPoint3{ std::sin(heading), std::cos(heading), 0.0f };
+			}
 			float        step = d.order.speed * dt;
 			RE::NiPoint3 next = pos + move * step;
 
@@ -281,7 +289,7 @@ namespace Driver
 			if (ground.point.z - pos.z > 45.0f || pos.z - ground.point.z > 90.0f) return "step";
 			next.z = ground.point.z;
 
-			float heading = TurnToward(a->GetAngleZ(), face, 8.0f * dt);
+
 			a->SetPosition(next, true);
 			a->SetRotationZ(heading);
 			float scale = RE::bhkWorld::GetWorldScale();
@@ -305,9 +313,12 @@ namespace Driver
 			}
 			if (d.order.sprint && !d.sprinting) {
 				state->actorState1.sprinting = 1;
-				a->NotifyAnimationGraph("SprintStart"sv);
+				bool flag = a->SetGraphVariableBool("IsSprinting", true);
+				bool took = a->NotifyAnimationGraph("SprintStart"sv);
 				d.sprinting = true;
+				logger::info("{}: sprint flag {} event {}", a->GetDisplayFullName(), flag ? "set" : "missing", took ? "taken" : "refused");
 			}
+			if (d.sprinting) a->SetGraphVariableBool("IsSprinting", true);
 			return nullptr;
 		}
 	}
