@@ -94,6 +94,7 @@ namespace Followers
 			float bestTargetTime = 0.0f;
 			float lastSprintKick = -100.0f;
 			bool  mirroringSprint = false;
+			bool  wasKnocked = false;
 			RE::ActorHandle addsFirstFor;          // a summoner too tough to rush: its summons first
 			RE::NiPoint3 sprintCheckPos;           // sprinting on the spot (the AI sprinting into something)
 			float sprintCheckTime = -1.0f;
@@ -739,14 +740,70 @@ namespace Followers
 			float lastTime = -100.0f;
 			int   hits = 0;
 		};
-		std::map<std::pair<RE::FormID, RE::FormID>, HitTally> g_hitTally;      // (follower, enemy)
-		std::map<std::pair<RE::FormID, std::uint32_t>, float> g_futileUntil;   // (follower, kind of enemy)
+		std::map<std::pair<RE::FormID, RE::FormID>, HitTally> g_hitTally;      // (follower, enemy): her hits
+		std::map<std::pair<RE::FormID, RE::FormID>, HitTally> g_knockTally;    // (follower, enemy): it knocking her down
+		struct FutileMark
+		{
+			float           until = 0.0f;
+			RE::ActorHandle who;      // the one she tried it on
+			float           hp = 0.0f;  // its health then: if that drops, it can be hurt after all
+		};
+		// keyed by what the enemy is made from: every whirlwind of a boss, but not every mage when one
+		// boss is invulnerable for a while
+		std::map<std::pair<RE::FormID, RE::FormID>, FutileMark> g_futile;
+
+		RE::FormID MadeFrom(RE::Actor* e)
+		{
+			if (auto lvl = e->extraList.GetByType<RE::ExtraLeveledCreature>(); lvl && lvl->originalBase) return lvl->originalBase->GetFormID();
+			auto base = e->GetActorBase();
+			return base ? base->GetFormID() : e->GetFormID();
+		}
 
 		bool Futile(RE::Actor* f, RE::Actor* e)
 		{
 			if (!f || !e) return false;
-			auto it = g_futileUntil.find({ f->GetFormID(), Experience::KindOf(e) });
-			return it != g_futileUntil.end() && g_time < it->second;
+			auto it = g_futile.find({ f->GetFormID(), MadeFrom(e) });
+			return it != g_futile.end() && g_time < it->second.until;
+		}
+
+		void MarkFutile(RE::Actor* f, RE::Actor* e, std::string_view a_why)
+		{
+			float hp = e->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+			g_futile[{ f->GetFormID(), MadeFrom(e) }] = { g_time + 45.0f, e->GetHandle(), hp };
+			Debug(std::format("{} can't {} {}: leaves it alone", Name(f), a_why, Name(e)));
+		}
+
+		// its health bar moved (her hits, the player's, a spell): vulnerable again (bosses with
+		// invulnerable phases)
+		void RecheckFutile(RE::Actor* f)
+		{
+			for (auto& [key, mark] : g_futile) {
+				if (key.first != f->GetFormID() || g_time >= mark.until) continue;
+				auto e = Get(mark.who);
+				if (!Alive(e)) continue;
+				auto  avo = e->AsActorValueOwner();
+				float maxHp = std::max(1.0f, avo->GetPermanentActorValue(RE::ActorValue::kHealth));
+				if (avo->GetActorValue(RE::ActorValue::kHealth) < mark.hp - 0.01f * maxHp) {
+					mark.until = 0.0f;
+					Debug(std::format("{}: {} can be hurt now", Name(f), Name(e)));
+				}
+			}
+		}
+
+		// knocked down by the same enemy twice while it took no damage: can't even get near it
+		void TallyKnock(RE::Actor* f, RE::Actor* e)
+		{
+			float hp = e->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+			auto& t = g_knockTally[{ f->GetFormID(), e->GetFormID() }];
+			if (g_time - t.firstTime > 20.0f) {
+				t = { hp, g_time, g_time, 1 };
+				return;
+			}
+			float maxHp = std::max(1.0f, e->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kHealth));
+			if (++t.hits >= 2 && t.hpAtFirst - hp < 0.01f * maxHp) {
+				MarkFutile(f, e, "get near");
+				t = {};
+			}
 		}
 
 		void TallyHit(RE::Actor* f, RE::Actor* e)
@@ -762,10 +819,7 @@ namespace Followers
 			}
 			if (++t.hits < 4) return;
 			float maxHp = std::max(1.0f, avo->GetPermanentActorValue(RE::ActorValue::kHealth));
-			if (t.hpAtFirst - hp < 0.01f * maxHp) {
-				g_futileUntil[{ f->GetFormID(), Experience::KindOf(e) }] = g_time + 45.0f;
-				Debug(std::format("{} can't hurt {} ({} hits, health didn't move): leaves it alone", Name(f), Name(e), t.hits));
-			}
+			if (t.hpAtFirst - hp < 0.01f * maxHp) MarkFutile(f, e, "hurt");
 			t = { hp, g_time, g_time, 1 };
 		}
 
@@ -2074,6 +2128,17 @@ namespace Followers
 				s.mirroringSprint = false;
 			}
 
+			// knocked down: by whom (what hit her just now, or the enemy nearest her)
+			{
+				bool knocked = fstate->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal;
+				if (knocked && !s.wasKnocked) {
+					auto by = g_time - s.lastAttackedTime < 1.0f ? Get(s.lastAttacker) : nullptr;
+					if (Alive(by) && by != player && !by->IsPlayerTeammate()) TallyKnock(f, by);
+				}
+				s.wasKnocked = knocked;
+				RecheckFutile(f);
+			}
+
 			// sprinting on the spot (the combat AI sprints her into a coffin, a wall, a crowd): a player lets
 			// go of sprint when they aren't getting anywhere
 			if (fstate->IsSprinting() && !Driver::IsDriving(f)) {
@@ -2645,7 +2710,8 @@ namespace Followers
 		Lab::ForgetHealth();
 		Experience::Apply();
 		g_hitTally.clear();
-		g_futileUntil.clear();
+		g_knockTally.clear();
+		g_futile.clear();
 		{
 			std::scoped_lock lock{ g_lock };
 			g_queue.clear();
