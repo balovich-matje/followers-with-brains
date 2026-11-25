@@ -942,7 +942,7 @@ namespace Driver
 
 	bool IsDriving(RE::Actor* a_actor) { return a_actor && g_drives.contains(a_actor->GetFormID()); }
 
-	const char* Dodge(RE::Actor* a_actor, RE::Actor* a_attacker)
+	const char* Dodge(RE::Actor* a_actor, RE::Actor* a_attacker, std::string_view a_prefer)
 	{
 		if (!a_actor || !a_attacker) return nullptr;
 		auto cell = a_actor->GetParentCell();
@@ -956,18 +956,19 @@ namespace Driver
 		// the dodge animations go relative to where she faces: face the attacker first
 		a_actor->SetRotationZ(Heading(to));
 		RE::NiPoint3 right{ to.y, -to.x, 0.0f };
-		int          first = (std::rand() % 2) ? 1 : -1;
+		int          first = a_prefer == "right" ? 1 : a_prefer == "left" ? -1 : ((std::rand() % 2) ? 1 : -1);
 		struct Option
 		{
 			RE::NiPoint3 dir;
 			const char*  event;
 			const char*  name;
 		};
-		const Option options[] = {
+		Option options[] = {
 			{ right * static_cast<float>(first), first > 0 ? "TKDodgeRight" : "TKDodgeLeft", first > 0 ? "right" : "left" },
 			{ right * static_cast<float>(-first), first > 0 ? "TKDodgeLeft" : "TKDodgeRight", first > 0 ? "left" : "right" },
 			{ to * -1.0f, "TKDodgeBack", "back" },
 		};
+		if (a_prefer == "back") std::rotate(std::begin(options), std::begin(options) + 2, std::end(options));
 		for (auto& o : options) {
 			if (!ClearStep(a_actor, world, a_actor->GetPosition(), o.dir, 220.0f)) continue;
 			if (Send(a_actor, o.event)) return o.name;

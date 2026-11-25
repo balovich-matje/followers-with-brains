@@ -951,6 +951,46 @@ namespace Followers
 		};
 
 		std::unordered_map<RE::FormID, ReflexState>                  g_reflex;
+
+		// Learning what works against each kind of enemy, as a player does after a few hits: for each
+		// race, how often each way out (0 step back, 1 dodge left, 2 dodge right, 3 dodge back) avoided
+		// the attack. The best one is used most; the others now and then, to keep learning.
+		constexpr const char* kWays[] = { "step back", "dodge left", "dodge right", "dodge back" };
+		struct Tally
+		{
+			int tries = 0;
+			int avoided = 0;
+		};
+		std::map<std::pair<RE::FormID, int>, Tally> g_learned;  // (race, way)
+		struct Outcome
+		{
+			RE::FormID      follower;
+			RE::ActorHandle enemy;
+			RE::FormID      race;
+			int             way;
+			float           time;
+		};
+		std::vector<Outcome> g_outcomes;
+		std::unordered_map<RE::FormID, float> g_drawStart;  // enemy: when its current wind-up began
+
+		RE::FormID RaceOf(RE::Actor* a) { return a && a->GetRace() ? a->GetRace()->GetFormID() : 0; }
+
+		int PickWay(RE::Actor* e)
+		{
+			if (std::rand() % 100 < 15) return std::rand() % 4;  // try something else now and then
+			auto  race = RaceOf(e);
+			int   best = 0;
+			float bestScore = -1.0f;
+			for (int w = 0; w < 4; ++w) {
+				auto& t = g_learned[{ race, w }];
+				float score = (t.avoided + 1.0f) / (t.tries + 2.0f) + (std::rand() % 100) * 0.0001f;
+				if (score > bestScore) {
+					bestScore = score;
+					best = w;
+				}
+			}
+			return best;
+		}
 		std::unordered_map<RE::FormID, RE::ATTACK_STATE_ENUM>         g_enemyAttack;  // last seen attack state
 		std::unordered_map<RE::FormID, bool>                          g_enemyStagger;
 		std::unordered_map<RE::FormID, int>                           g_bashFails;    // enemies that shrug off bashes
@@ -1051,14 +1091,20 @@ namespace Followers
 					r.until = g_time + 0.7f;
 					++g_stats.blocks;
 					what = "block";
-				} else if (const char* dir = (power || share > 0.3f || static_cast<float>(std::rand() % 100) < Tuning::Get().rollChance) ?
-				                                 Driver::Dodge(f, e) : nullptr) {
+				} else if (int way = PickWay(e); way > 0 && [&] {
+					           const char* dir = Driver::Dodge(f, e, way == 1 ? "left" : way == 2 ? "right" : "back");
+					           if (!dir) return false;
+					           // the way actually taken (another one when the chosen side had no room)
+					           int taken = dir[0] == 'l' ? 1 : dir[0] == 'r' ? 2 : 3;
+					           g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), RaceOf(e), taken, g_time });
+					           what = kWays[taken];
+					           return true;
+				           }()) {
 					// a real dodge (the animation carries her out), strike back once it's done
 					r.action = 4;
 					r.until = g_time + 0.7f;
 					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown;
 					++g_stats.stepOuts;
-					what = dir[0] == 'b' ? "dodge back" : dir[0] == 'l' ? "dodge left" : "dodge right";
 				} else {
 					// step back out of reach (offset is in front of the enemy, away from it)
 					float reach = 250.0f;
@@ -1078,6 +1124,7 @@ namespace Followers
 					r.until = g_time + 2.0f;
 					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown;  // a breather before the next dodge
 					++g_stats.stepOuts;
+					g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), RaceOf(e), 0, g_time });
 					what = "step out";
 				}
 			} else {
@@ -1102,6 +1149,21 @@ namespace Followers
 				}
 				if (g_lastFollowerHurt < *it) ++g_stats.avoided;
 				it = g_pendingCheck.erase(it);
+			}
+			// what came of each way out: hit by that enemy within the next second or so?
+			for (auto it = g_outcomes.begin(); it != g_outcomes.end();) {
+				if (g_time - it->time < 1.0f) {
+					++it;
+					continue;
+				}
+				auto& st = g_state[it->follower];
+				bool  hit = st.lastAttackedTime > it->time && st.lastAttackedTime <= it->time + 1.0f && st.lastAttacker == it->enemy;
+				auto& t = g_learned[{ it->race, it->way }];
+				++t.tries;
+				if (!hit) ++t.avoided;
+				auto e = Get(it->enemy);
+				logger::info("{} vs {}: {} ({}/{} avoided so far)", kWays[it->way], e ? Name(e) : "enemy", hit ? "hit" : "avoided", t.avoided, t.tries);
+				it = g_outcomes.erase(it);
 			}
 			for (auto& fh : g_lastFollowers) {
 				auto f = Get(fh);
@@ -1136,11 +1198,18 @@ namespace Followers
 					r.punishApproachStarted = false;
 				}
 				if (r.action == 4 && g_time >= r.until) {
-					EndReflex(f, r);
-					r.punishAt = g_time;
-					r.punishApproachStarted = false;
+					// still winding up or swinging (a bear holding its swipe): wait it out before striking
+					auto e = Get(r.against);
+					auto st = e ? e->AsActorState()->GetAttackState() : RE::ATTACK_STATE_ENUM::kNone;
+					bool waiting = Alive(e) && (st == RE::ATTACK_STATE_ENUM::kDraw || st == RE::ATTACK_STATE_ENUM::kSwing) &&
+					               g_time - r.until < 2.5f;
+					if (!waiting) {
+						EndReflex(f, r);
+						r.punishAt = g_time;
+						r.punishApproachStarted = false;
+					}
 				}
-				if (r.action != 0 && g_time >= r.until) {
+				if (r.action != 0 && r.action != 4 && g_time >= r.until) {
 					// a bash that did not stagger counts against that enemy
 					if (r.action == 3) {
 						auto e = Get(r.against);
@@ -1204,7 +1273,12 @@ namespace Followers
 					auto windup = [](RE::ATTACK_STATE_ENUM a) {
 						return a == RE::ATTACK_STATE_ENUM::kDraw || a == RE::ATTACK_STATE_ENUM::kSwing;
 					};
-					bool starting = windup(state) && !windup(prev);
+					if (state == RE::ATTACK_STATE_ENUM::kDraw && prev != RE::ATTACK_STATE_ENUM::kDraw) g_drawStart[id] = g_time;
+					// a new attack: and, after a long wind-up (bears, trolls hold it for seconds), the swing
+					// itself, which lands a split second later
+					bool longDraw = prev == RE::ATTACK_STATE_ENUM::kDraw && state == RE::ATTACK_STATE_ENUM::kSwing &&
+					                g_time - g_drawStart[id] > 0.5f;
+					bool starting = (windup(state) && !windup(prev)) || longDraw;
 					if (starting) ++g_stats.enemyAttacks;
 					// the attack is meant for us if we are its target, or we are in front of it and within reach
 					bool aimedAtUs = CombatTarget(e) == f;
@@ -1214,7 +1288,7 @@ namespace Followers
 						auto  fwd = Forward(e);
 						aimedAtUs = len > 1.0f && (toF.x * fwd.x + toF.y * fwd.y) / len > 0.5f;
 					}
-					if (starting && aimedAtUs && r.action == 0 && g_time >= r.cooldownUntil) {
+					if (starting && aimedAtUs && ((r.action == 0 && g_time >= r.cooldownUntil) || (longDraw && r.action == 4))) {
 						ReactToAttack(f, e, r);
 					}
 				}

@@ -69,7 +69,8 @@ namespace Driver
 	// An animated dodge (left, right or back, whichever has room) from the behavior graph's dodge
 	// events, where the modlist provides them (TK Dodge style: TKDodgeLeft/Right/Back). The animation
 	// moves the body. Returns the direction, or nullptr when there is no room or the graph refused.
-	const char* Dodge(RE::Actor* a_actor, RE::Actor* a_attacker);
+	// a_prefer: "left", "right" or "back" to try first (others follow when it has no room).
+	const char* Dodge(RE::Actor* a_actor, RE::Actor* a_attacker, std::string_view a_prefer = {});
 
 	// The kind of drive in progress ("charge", "stepback", ...), or "" when not driven.
 	const char* Current(RE::Actor* a_actor);
