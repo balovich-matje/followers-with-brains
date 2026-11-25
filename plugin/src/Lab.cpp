@@ -239,12 +239,16 @@ namespace Lab
 
 		std::unordered_map<RE::FormID, float> g_extraHealth;
 
+		// Sets the extra health (0 = back to her real health). It used to add, and repeated test
+		// commands piled up to +18000.
 		void AddHealth(RE::Actor* a, float a_amount)
 		{
 			auto& extra = g_extraHealth[a->GetFormID()];
-			extra = std::max(0.0f, extra + a_amount);  // taking health away again: back to her real health
+			float target = std::max(0.0f, a_amount);
+			float delta = target - extra;
+			extra = target;
 			auto avo = a->AsActorValueOwner();
-			avo->ModActorValue(RE::ActorValue::kHealth, a_amount);
+			avo->ModActorValue(RE::ActorValue::kHealth, delta);
 			avo->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, 1e6f);
 		}
 
@@ -314,7 +318,7 @@ namespace Lab
 				if (words.size() >= 4 && words[3] == "both" && !b->IsPlayerRef()) Papyrus::StartCombat(b, a);
 				Say(std::format("{} fights {}", a->GetDisplayFullName(), b->GetDisplayFullName()));
 			} else if (cmd == "health" && words.size() >= 3) {
-				// health <who> <extra>: more health, fully healed
+				// health <who> <extra>: this much extra health (0 = none), fully healed
 				if (auto a = Who(words[1])) {
 					AddHealth(a, num(2, 0.0f));
 					Say(std::format("{} health {:.0f}", a->GetDisplayFullName(), a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth)));
