@@ -2248,7 +2248,10 @@ namespace Followers
 			if (cfg.focusSummoners && target->IsCommandedActor() && g_time - s.lastRetarget > 1.0f) {
 				bool ignored = Get(s.ignoredSummon) == target && g_time < s.ignoreSummonUntil;
 				auto summoner = target->GetCommandingActor();
-				if (!ignored && summoner && Alive(summoner.get()) && IsEnemyOf(summoner.get(), player) &&
+				// a summon already on her while its master is well away: cut it down first, as a player does
+				// (otherwise she and the game's AI tug her target back and forth every second)
+				bool summonOnHer = summoner && Dist(f, target) < 300.0f && Dist(f, summoner.get()) > Dist(f, target) + 300.0f;
+				if (!ignored && !summonOnHer && summoner && Alive(summoner.get()) && IsEnemyOf(summoner.get(), player) &&
 					Dist(f, summoner.get()) < kSummonerReach) {
 					s.redirectedFrom = target->GetHandle();
 					StartCombat(f, s, summoner.get(), "summoner first");
