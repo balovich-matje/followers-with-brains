@@ -1652,7 +1652,13 @@ namespace Followers
 						inWay(RE::PlayerCharacter::GetSingleton());
 						for (auto& h : g_lastFollowers) inWay(Get(h));
 						float held = g_time - r.drawnSince;
-						if ((friendInWay && held > 1.2f) || held > 3.0f) {
+						// the game's AI holds its shot while a friend is anywhere near the target (the player
+						// brawling with it): a player looses anyway when the line itself is clear
+						if (!friendInWay && held > 1.0f && Driver::ClearLine(f, fp, ep)) {
+							bool took = f->NotifyAnimationGraph("attackRelease"sv);
+							logger::info("{}: looses at {} herself after {:.1f}s held ({})", Name(f), Name(e), held, took ? "taken" : "refused");
+							r.drawnSince = took ? -1.0f : g_time;  // refused: try again in a moment, or step round
+						} else if ((friendInWay && held > 1.2f) || held > 3.0f) {
 							// round the target by ~45 degrees, to whichever side is open
 							float ang = std::atan2(fp.x - ep.x, fp.y - ep.y);
 							float dist = std::max(300.0f, len);
