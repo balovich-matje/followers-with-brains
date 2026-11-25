@@ -95,6 +95,7 @@ namespace Followers
 			float lastSprintKick = -100.0f;
 			bool  mirroringSprint = false;
 			bool  wasKnocked = false;
+			float weaponStuckSince = -1.0f;        // weapon half drawn or half sheathed
 			RE::ActorHandle addsFirstFor;          // a summoner too tough to rush: its summons first
 			RE::NiPoint3 sprintCheckPos;           // sprinting on the spot (the AI sprinting into something)
 			float sprintCheckTime = -1.0f;
@@ -2126,6 +2127,24 @@ namespace Followers
 				f->SetGraphVariableBool("IsSprinting", false);
 				f->NotifyAnimationGraph("SprintStop"sv);
 				s.mirroringSprint = false;
+			}
+
+			// weapon stuck half drawn (seen in a city after a fight: combat pose, sheathed, deaf to the player
+			// drawing): back to sheathed and the default pose, and the game draws again when it wants to
+			{
+				using W = RE::WEAPON_STATE;
+				auto ws = fstate->GetWeaponState();
+				bool between = ws == W::kWantToDraw || ws == W::kDrawing || ws == W::kWantToSheathe || ws == W::kSheathing;
+				if (!between || Driver::IsDriving(f)) {
+					s.weaponStuckSince = -1.0f;
+				} else if (s.weaponStuckSince < 0.0f) {
+					s.weaponStuckSince = g_time;
+				} else if (g_time - s.weaponStuckSince > 3.0f) {
+					fstate->actorState2.weaponState = W::kSheathed;
+					f->NotifyAnimationGraph("IdleForceDefaultState"sv);
+					logger::info("{}: weapon stuck {} for 3 s, reset to sheathed", Name(f), static_cast<int>(ws));
+					s.weaponStuckSince = -1.0f;
+				}
 			}
 
 			// knocked down: by whom (what hit her just now, or the enemy nearest her)

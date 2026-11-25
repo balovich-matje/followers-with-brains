@@ -324,6 +324,14 @@ namespace Lab
 					AddHealth(a, num(2, 0.0f));
 					Say(std::format("{} health {:.0f}", a->GetDisplayFullName(), a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth)));
 				}
+			} else if (cmd == "anim" && words.size() >= 3) {
+				// anim <who> <graph event>: e.g. IdleForceDefaultState to unstick a pose
+				if (auto a = Who(words[1])) {
+					bool took = a->NotifyAnimationGraph(words[2]);
+					bool drawn = a->AsActorState()->IsWeaponDrawn();
+					Say(std::format("{}: {} {} (weapon {}, weapon state {})", a->GetDisplayFullName(), words[2], took ? "taken" : "refused",
+						drawn ? "drawn" : "sheathed", static_cast<int>(a->AsActorState()->GetWeaponState())));
+				}
 			} else if (cmd == "base" && words.size() >= 2) {
 				// base <ref id>: what a placed actor is made from (to spawn it again later)
 				RE::Actor* a = nullptr;
