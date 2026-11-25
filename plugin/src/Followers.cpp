@@ -268,6 +268,12 @@ namespace Followers
 			a->NotifyAnimationGraph("attackStart"sv);
 		}
 
+		float MeleeReach(RE::Actor* f)
+		{
+			auto w = f->GetEquippedObject(false) ? f->GetEquippedObject(false)->As<RE::TESObjectWEAP>() : nullptr;
+			return w ? std::max(120.0f, w->GetReach() * 140.0f) : 150.0f;
+		}
+
 		bool Reachable(RE::Actor* f, RE::Actor* e)
 		{
 			return std::fabs(e->GetPosition().z - f->GetPosition().z) < 120.0f && Driver::ClearLine(f, f->GetPosition(), e->GetPosition());
@@ -1673,12 +1679,6 @@ namespace Followers
 		}
 
 		// ------------------------------------------------------------------ cutting enemies down
-		float MeleeReach(RE::Actor* f)
-		{
-			auto w = f->GetEquippedObject(false) ? f->GetEquippedObject(false)->As<RE::TESObjectWEAP>() : nullptr;
-			return w ? std::max(120.0f, w->GetReach() * 140.0f) : 150.0f;
-		}
-
 		// Roughly how long she needs to kill e from where she stands: walking up plus her swings.
 		float KillTime(RE::Actor* f, RE::Actor* e)
 		{
