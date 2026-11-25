@@ -94,7 +94,8 @@ namespace Potions
 		{
 			RE::ActorEquipManager::GetSingleton()->EquipObject(a_actor, a_potion);
 			a_state.lastDrink = a_now;
-			logger::info("{} drinks {} ({})", a_actor->GetDisplayFullName(), a_potion->GetName(), a_why);
+			auto name = a_potion->GetName();
+			logger::info("{} drinks {} ({})", a_actor->GetDisplayFullName(), name && *name ? name : "a potion", a_why);
 		}
 	}
 
@@ -167,9 +168,10 @@ namespace Potions
 		std::string out;
 		for (auto& [obj, data] : a_actor->GetInventory([](RE::TESBoundObject& o) { return o.Is(RE::FormType::AlchemyItem); })) {
 			auto potion = obj ? obj->As<RE::AlchemyItem>() : nullptr;
-			if (!potion) continue;
+			if (!potion || data.first <= 0) continue;
+			auto name = potion->GetName();
 			auto kind = KindOf(potion);
-			out += std::format("{}{} {:08X} x{} ({}{})", out.empty() ? "" : "; ", potion->GetName(), potion->GetFormID(), data.first,
+			out += std::format("{}{} {:08X} x{} ({}{})", out.empty() ? "" : "; ", name && *name ? name : "?", potion->GetFormID(), data.first,
 				kind == Kind::kHeal ? "heal" : kind == Kind::kBuff ? "buff" : "ignored",
 				kind == Kind::kHeal ? std::format(", {:.0f} hp", HealAmount(potion)) : std::string{});
 			{
