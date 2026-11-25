@@ -939,7 +939,7 @@ namespace Followers
 		// ------------------------------------------------------------------ reflexes (every frame)
 		struct ReflexState
 		{
-			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash
+			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash, 4 dodge animation
 			float until = 0.0f;
 			float cooldownUntil = 0.0f;
 			float punishAt = -1.0f;
@@ -1051,6 +1051,14 @@ namespace Followers
 					r.until = g_time + 0.7f;
 					++g_stats.blocks;
 					what = "block";
+				} else if (const char* dir = (power || share > 0.3f || static_cast<float>(std::rand() % 100) < Tuning::Get().rollChance) ?
+				                                 Driver::Dodge(f, e) : nullptr) {
+					// a real dodge (the animation carries her out), strike back once it's done
+					r.action = 4;
+					r.until = g_time + 0.7f;
+					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown;
+					++g_stats.stepOuts;
+					what = dir[0] == 'b' ? "dodge back" : dir[0] == 'l' ? "dodge left" : "dodge right";
 				} else {
 					// step back out of reach (offset is in front of the enemy, away from it)
 					float reach = 250.0f;
@@ -1123,6 +1131,11 @@ namespace Followers
 				}
 				// a step back is over once the driver lets go (the swing ended): go back in and punish
 				if (r.action == 1 && !Driver::IsDriving(f)) {
+					EndReflex(f, r);
+					r.punishAt = g_time;
+					r.punishApproachStarted = false;
+				}
+				if (r.action == 4 && g_time >= r.until) {
 					EndReflex(f, r);
 					r.punishAt = g_time;
 					r.punishApproachStarted = false;

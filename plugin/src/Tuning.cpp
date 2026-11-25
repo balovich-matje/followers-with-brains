@@ -23,6 +23,7 @@ namespace Tuning
 			{ "DodgeCooldown"sv, &Values::dodgeCooldown },
 			{ "CloseSpeed"sv, &Values::closeSpeed },
 			{ "FinishMargin"sv, &Values::finishMargin },
+			{ "RollChance"sv, &Values::rollChance },
 		};
 
 		std::string Trim(std::string_view a_text)
