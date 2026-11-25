@@ -1107,8 +1107,10 @@ namespace Followers
 			                (rightWeap && (rightWeap->IsTwoHandedSword() || rightWeap->IsTwoHandedAxe())) ||
 			                (rightWeap && rightWeap->IsMelee() && !left);
 			// (not mid-swing of her own: a bash can't start then)
+			// (and stamina for it: a bash costs some, and an exhausted one just doesn't happen)
 			bool  bashable = canBlock && g_bashFails[e->GetFormID()] < 2 && Dist(f, e) < 200.0f &&
-			                f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone;
+			                f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone &&
+			                f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kStamina) >= 40.0f;
 
 			// A player's read of the moment: if she can bring it down with the hits she has time for before
 			// its swing lands, dodging only wastes the opening. Keep hitting.
@@ -1228,7 +1230,7 @@ namespace Followers
 				}
 				if (r.action == 3 && !r.bashPending && g_time - r.bashTime > 0.3f && g_time - r.bashTime < 0.45f &&
 					f->AsActorState()->GetAttackState() != RE::ATTACK_STATE_ENUM::kBash) {
-					// the bash did not happen: a dodge instead (the animation), or a short step out of reach
+					// the bash did not happen (logged with her stamina, to see why): a dodge instead (the animation), or a short step out of reach
 					auto e = Get(r.against);
 					EndReflex(f, r);
 					const char* side = Alive(e) ? Driver::Dodge(f, e, Experience::PickWay(f, e) == 2 ? "right" : "left") : nullptr;
@@ -1236,7 +1238,8 @@ namespace Followers
 						r.action = 4;
 						r.until = g_time + 0.7f;
 						r.against = e->GetHandle();
-						logger::info("{}: bash did not start, dodges {} instead", Name(f), side);
+						logger::info("{}: bash did not start (stamina {:.0f}), dodges {} instead", Name(f),
+							f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kStamina), side);
 					} else if (Alive(e)) {
 						float eReach = 250.0f;
 						if (auto ew = e->GetEquippedObject(false); ew && ew->As<RE::TESObjectWEAP>()) {
