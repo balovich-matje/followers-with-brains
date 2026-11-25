@@ -3,6 +3,7 @@
 #include "Tuning.h"
 #include "Recorder.h"
 #include "Lab.h"
+#include "Bodies.h"
 #include "Host.h"
 #include "Loadout.h"
 #include "Papyrus.h"
@@ -58,6 +59,8 @@ namespace Followers
 			float followSampleTime = -100.0f;
 			float nextTrail = 0.0f;
 			float hazardUntil = 0.0f;      // hurt by a trap: the game's own movement until then
+			RE::NiPoint3 bodyCheckPos;     // running in place (a body in the way)?
+			float slowSince = -1.0f;
 			float footstepsAt = -100.0f;   // last time she set off in the player's footsteps
 			int   footstepFails = 0;       // footsteps runs blocked right away (then the game's pathing)
 			float looseness = 1.0f;
@@ -1439,6 +1442,24 @@ namespace Followers
 			bool  busy = waiting || InScene(f) || f->IsOnMount() || player->IsOnMount() ||
 			            state->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal || state->IsBleedingOut() || g_time < s.hazardUntil;
 			if ((state->IsBleedingOut() || g_time < s.hazardUntil) && Driver::IsDriving(f)) Driver::Stop(f);
+
+			// Legs running, body going nowhere, under the game's own AI: a body in the way, most likely.
+			// Shove it aside, as a player's walk does.
+			{
+				auto  pos = f->GetPosition();
+				float moved = pos.GetDistance(s.bodyCheckPos);
+				s.bodyCheckPos = pos;
+				float animSpeed = 0.0f;
+				f->GetGraphVariableFloat("Speed", animSpeed);
+				if (!Driver::IsDriving(f) && !busy && animSpeed > 80.0f && moved < 5.0f) {
+					if (s.slowSince < 0.0f) s.slowSince = g_time;
+					if (g_time - s.slowSince > 0.4f) {
+						if (auto body = Bodies::InTheWay(f, Forward(f), 150.0f)) Bodies::Kick(f, body);
+					}
+				} else {
+					s.slowSince = -1.0f;
+				}
+			}
 			bool  sameSpace = f->GetWorldspace() == player->GetWorldspace() &&
 			                 (player->GetWorldspace() || f->GetParentCell() == player->GetParentCell());
 			// tagging along after an unreachable enemy ends with the fight, a retreat or a new target
