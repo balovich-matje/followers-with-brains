@@ -2,6 +2,7 @@
 #include "Driver.h"
 #include "Followers.h"
 #include "Papyrus.h"
+#include "Settings.h"
 
 namespace Lab
 {
@@ -287,6 +288,15 @@ namespace Lab
 					Papyrus::StopCombat(a);
 					Say(std::format("{} stops fighting", a->GetDisplayFullName()));
 				}
+			} else if (cmd == "set" && words.size() >= 3) {
+				// set <Setting> <value>: same as changing it in the MCM
+				if (words[2].find('.') != std::string::npos) {
+					Settings::SetFloat(words[1], num(2, 0.0f));
+				} else {
+					Settings::SetInt(words[1], static_cast<int>(num(2, 0.0f)));
+				}
+				Settings::Save();
+				Say(std::format("{} = {}", words[1], words[2]));
 			} else {
 				Say(std::format("unknown lab command: {}", cmd));
 			}
