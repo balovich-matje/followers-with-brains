@@ -2610,7 +2610,10 @@ namespace Followers
 					Queue(EventType::kHit, HandleOf(a_event->cause.get()), HandleOf(a_event->target.get()));
 					auto source = a_event->source ? RE::TESForm::LookupByID(a_event->source) : nullptr;
 					auto weap = source ? source->As<RE::TESObjectWEAP>() : nullptr;
-					if (!a_event->projectile && (!source || (weap && weap->IsMelee()))) {
+					// a blocked hit does next to nothing: it says nothing about whether the target can be hurt
+					// (an enemy behind a shield isn't immune), nor is it a dodge that failed
+					bool blocked = a_event->flags.any(RE::TESHitEvent::Flag::kHitBlocked);
+					if (!a_event->projectile && !blocked && (!source || (weap && weap->IsMelee()))) {
 						Queue(EventType::kMeleeHit, HandleOf(a_event->cause.get()), HandleOf(a_event->target.get()));
 					}
 				}
