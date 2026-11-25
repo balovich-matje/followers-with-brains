@@ -1,6 +1,7 @@
 // The brain: everything the mod decides and does, in a DLL of its own that the loader
 // (FollowersWithBrains.dll) loads, and can swap for a newer build while the game runs.
 // These are the only entry points; the loader calls them on the main thread.
+#include "Experience.h"
 #include "Followers.h"
 #include "Host.h"
 #include "Settings.h"
@@ -55,6 +56,7 @@ FWB_EXPORT void FWB_Resume()
 	Settings::Load();
 	Followers::Install();
 	Followers::Reset();
+	Experience::Unstash();
 	logger::info("Brain reloaded into the running game");
 }
 

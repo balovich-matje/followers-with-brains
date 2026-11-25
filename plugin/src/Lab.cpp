@@ -222,7 +222,8 @@ namespace Lab
 
 		void AddHealth(RE::Actor* a, float a_amount)
 		{
-			g_extraHealth[a->GetFormID()] += a_amount;
+			auto& extra = g_extraHealth[a->GetFormID()];
+			extra = std::max(0.0f, extra + a_amount);  // taking health away again: back to her real health
 			auto avo = a->AsActorValueOwner();
 			avo->ModActorValue(RE::ActorValue::kHealth, a_amount);
 			avo->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, 1e6f);

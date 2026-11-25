@@ -4,6 +4,7 @@
 #include "Recorder.h"
 #include "Lab.h"
 #include "Bodies.h"
+#include "Experience.h"
 #include "Host.h"
 #include "Loadout.h"
 #include "Papyrus.h"
@@ -927,6 +928,14 @@ namespace Followers
 				break;
 
 			case EventType::kDeath:  // a = dead actor
+				// how she does against that kind of enemy now (followers who fought it)
+				if (a && a != player && !a->IsPlayerTeammate()) {
+					for (auto f : a_scan.followers) {
+						if (CombatTarget(f) == a || Get(g_state[f->GetFormID()].lastAttacker) == a) {
+							Debug(std::format("{} vs {}", Name(f), Experience::Summary(f, a)));
+						}
+					}
+				}
 				if (!cfg.retarget || !a) break;
 				for (auto f : a_scan.followers) {
 					auto& s = g_state[f->GetFormID()];
@@ -943,6 +952,8 @@ namespace Followers
 		struct ReflexState
 		{
 			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash, 4 dodge animation
+			RE::ActorHandle seen;      // an attack she has seen coming, to react to at reactAt
+			float reactAt = -1.0f;
 			float until = 0.0f;
 			float cooldownUntil = 0.0f;
 			float punishAt = -1.0f;
@@ -955,45 +966,18 @@ namespace Followers
 
 		std::unordered_map<RE::FormID, ReflexState>                  g_reflex;
 
-		// Learning what works against each kind of enemy, as a player does after a few hits: for each
-		// race, how often each way out (0 step back, 1 dodge left, 2 dodge right, 3 dodge back) avoided
-		// the attack. The best one is used most; the others now and then, to keep learning.
-		constexpr const char* kWays[] = { "step back", "dodge left", "dodge right", "dodge back" };
-		struct Tally
-		{
-			int tries = 0;
-			int avoided = 0;
-		};
-		std::map<std::pair<RE::FormID, int>, Tally> g_learned;  // (race, way)
+		// what came of each way out (scored a moment later: was she hit?)
 		struct Outcome
 		{
 			RE::FormID      follower;
 			RE::ActorHandle enemy;
-			RE::FormID      race;
+			std::uint32_t   kind;
 			int             way;
 			float           time;
 		};
 		std::vector<Outcome> g_outcomes;
 		std::unordered_map<RE::FormID, float> g_drawStart;  // enemy: when its current wind-up began
 
-		RE::FormID RaceOf(RE::Actor* a) { return a && a->GetRace() ? a->GetRace()->GetFormID() : 0; }
-
-		int PickWay(RE::Actor* e)
-		{
-			if (std::rand() % 100 < 15) return std::rand() % 4;  // try something else now and then
-			auto  race = RaceOf(e);
-			int   best = 0;
-			float bestScore = -1.0f;
-			for (int w = 0; w < 4; ++w) {
-				auto& t = g_learned[{ race, w }];
-				float score = (t.avoided + 1.0f) / (t.tries + 2.0f) + (std::rand() % 100) * 0.0001f;
-				if (score > bestScore) {
-					bestScore = score;
-					best = w;
-				}
-			}
-			return best;
-		}
 		std::unordered_map<RE::FormID, RE::ATTACK_STATE_ENUM>         g_enemyAttack;  // last seen attack state
 		std::unordered_map<RE::FormID, bool>                          g_enemyStagger;
 		std::unordered_map<RE::FormID, int>                           g_bashFails;    // enemies that shrug off bashes
@@ -1094,13 +1078,13 @@ namespace Followers
 					r.until = g_time + 0.7f;
 					++g_stats.blocks;
 					what = "block";
-				} else if (int way = PickWay(e); way > 0 && [&] {
+				} else if (int way = Experience::PickWay(f, e); way > 0 && [&] {
 					           const char* dir = Driver::Dodge(f, e, way == 1 ? "left" : way == 2 ? "right" : "back");
 					           if (!dir) return false;
 					           // the way actually taken (another one when the chosen side had no room)
 					           int taken = dir[0] == 'l' ? 1 : dir[0] == 'r' ? 2 : 3;
-					           g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), RaceOf(e), taken, g_time });
-					           what = kWays[taken];
+					           g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), Experience::KindOf(e), taken, g_time });
+					           what = Experience::kWays[taken];
 					           return true;
 				           }()) {
 					// a real dodge (the animation carries her out), strike back once it's done
@@ -1127,7 +1111,7 @@ namespace Followers
 					r.until = g_time + 2.0f;
 					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown;  // a breather before the next dodge
 					++g_stats.stepOuts;
-					g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), RaceOf(e), 0, g_time });
+					g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), Experience::KindOf(e), 0, g_time });
 					what = "step out";
 				}
 			} else {
@@ -1161,11 +1145,9 @@ namespace Followers
 				}
 				auto& st = g_state[it->follower];
 				bool  hit = st.lastAttackedTime > it->time && st.lastAttackedTime <= it->time + 1.0f && st.lastAttacker == it->enemy;
-				auto& t = g_learned[{ it->race, it->way }];
-				++t.tries;
-				if (!hit) ++t.avoided;
+				Experience::Outcome(it->follower, it->kind, it->way, !hit);
 				auto e = Get(it->enemy);
-				logger::info("{} vs {}: {} ({}/{} avoided so far)", kWays[it->way], e ? Name(e) : "enemy", hit ? "hit" : "avoided", t.avoided, t.tries);
+				logger::info("{} vs {}: {}", Experience::kWays[it->way], e ? Name(e) : "enemy", hit ? "hit" : "avoided");
 				it = g_outcomes.erase(it);
 			}
 			for (auto& fh : g_lastFollowers) {
@@ -1250,6 +1232,17 @@ namespace Followers
 				}
 				if (!f->IsInCombat()) continue;
 
+				// a reaction on its way (she saw the attack a moment ago): act now if it's still coming
+				if (r.reactAt >= 0.0f && g_time >= r.reactAt) {
+					auto e = Get(r.seen);
+					r.reactAt = -1.0f;
+					auto st = e ? e->AsActorState()->GetAttackState() : RE::ATTACK_STATE_ENUM::kNone;
+					if (Alive(e) && (r.action == 0 || r.action == 4) &&
+						(st == RE::ATTACK_STATE_ENUM::kDraw || st == RE::ATTACK_STATE_ENUM::kSwing)) {
+						ReactToAttack(f, e, r);
+					}
+				}
+
 				for (auto& eh : g_lastEnemies) {
 					auto e = Get(eh);
 					if (!Alive(e)) continue;
@@ -1292,7 +1285,19 @@ namespace Followers
 						aimedAtUs = len > 1.0f && (toF.x * fwd.x + toF.y * fwd.y) / len > 0.5f;
 					}
 					if (starting && aimedAtUs && ((r.action == 0 && g_time >= r.cooldownUntil) || (longDraw && r.action == 4))) {
-						ReactToAttack(f, e, r);
+						// Does she see it coming, and how quickly? That depends on what she has learned about
+						// this kind of enemy (a new one fools her often; one she knows well, rarely).
+						auto read = Experience::Read(f, e);
+						Experience::SawAttack(f, e);
+						if (static_cast<float>(std::rand() % 1000) >= read.chance * 1000.0f) {
+							logger::info("{} doesn't see {}'s attack coming ({:.0f}% read)", Name(f), Name(e), read.chance * 100.0f);
+							r.cooldownUntil = g_time + 0.3f;
+						} else if (read.delay < 0.02f) {
+							ReactToAttack(f, e, r);
+						} else {
+							r.seen = e->GetHandle();
+							r.reactAt = g_time + read.delay;
+						}
 					}
 				}
 			}
@@ -2133,6 +2138,7 @@ namespace Followers
 		Host::ActionEvents()->RemoveEventSink(Sink::Get());
 
 		Driver::Uninstall();
+		Experience::Stash();
 		Lab::Shutdown();
 		Test::Shutdown();
 		// put the followers back the way the game had them
@@ -2152,6 +2158,7 @@ namespace Followers
 	{
 		Tuning::Load();
 		Lab::ForgetHealth();
+		Experience::Apply();
 		{
 			std::scoped_lock lock{ g_lock };
 			g_queue.clear();
@@ -2244,6 +2251,7 @@ namespace Followers
 		for (auto& [id, st] : g_state) {
 			for (auto [av, amount] : st.avMods) mods.emplace_back(id, av, amount);
 		}
+		Experience::Save(a_intfc);
 		if (!a_intfc->OpenRecord(kRecordBoosts, 2)) return;
 		auto count = static_cast<std::uint32_t>(mods.size());
 		a_intfc->WriteRecordData(count);
@@ -2258,6 +2266,10 @@ namespace Followers
 	{
 		std::uint32_t type, version, length;
 		while (a_intfc->GetNextRecordInfo(type, version, length)) {
+			if (type == Experience::kRecord) {
+				Experience::Load(a_intfc, version, length);
+				continue;
+			}
 			if (type != kRecordBoosts) continue;
 			std::uint32_t count = 0;
 			a_intfc->ReadRecordData(count);
@@ -2275,6 +2287,7 @@ namespace Followers
 
 	void OnRevert(SKSE::SerializationInterface*)
 	{
+		Experience::Revert();
 		g_pendingUndo.clear();
 	}
 }

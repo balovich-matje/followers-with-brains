@@ -19,7 +19,8 @@ namespace Tuning
 		float dodgeChance = 75.0f;    // percent
 		float dodgeCooldown = 2.5f;   // seconds between dodges
 		float rollChance = 50.0f;     // percent of dodges done with a dodge animation (big hits: always)
-		float finishMargin = 1.1f;    // keep attacking instead of dodging when her hits before the enemy's
+		float finishMargin = 1.1f;
+		float practice = 0.0f;        // test switch: 1 = followers read every attack, instantly (no learning curve)    // keep attacking instead of dodging when her hits before the enemy's
 		                              // swing lands come to this much of its health (1.1 = 10% to spare)
 		// closing back in to strike
 		float closeSpeed = 380.0f;    // units/s
