@@ -12,6 +12,8 @@ Work in progress.
 - A follower stuck below a rock you are on, above a drop you went down, or at a fence jumps:
   up, down or over, with the game's own jump animations.
 - Turning on the spot, strafing or backpedalling doesn't send them running round you.
+- When a pillar, wall or clutter stands between them and you, they walk in your footsteps
+  instead of cutting the corner. Indoors they stay a little closer.
 - When the game's pathfinding can't get a follower to you or to an enemy (an archer up a tower,
   a ledge above), they take the route you walked: up the same stairs, through the same gaps.
   If there is no such route yet, a melee follower sticks close to you instead of hiding, until

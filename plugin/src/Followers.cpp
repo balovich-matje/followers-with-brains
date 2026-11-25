@@ -56,6 +56,8 @@ namespace Followers
 			RE::NiPoint3 followSample;
 			float followSampleTime = -100.0f;
 			float nextTrail = 0.0f;
+			float footstepsAt = -100.0f;   // last time she set off in the player's footsteps
+			int   footstepFails = 0;       // footsteps runs blocked right away (then the game's pathing)
 			float looseness = 1.0f;
 			float otherSpaceSince = -1.0f;
 			float driveStarted = -100.0f;
@@ -468,22 +470,34 @@ namespace Followers
 			return out;
 		}
 
-		bool RunTrail(RE::Actor* f, FollowerState& s, RE::PlayerCharacter* a_player, RE::Actor* a_goal, std::string_view a_why)
+		bool RunTrail(RE::Actor* f, FollowerState& s, RE::PlayerCharacter* a_player, RE::Actor* a_goal, std::string_view a_why,
+			float a_cooldown = 4.0f)
 		{
 			if (g_time < s.nextTrail || Driver::IsDriving(f)) return false;
-			s.nextTrail = g_time + 4.0f;
+			s.nextTrail = g_time + a_cooldown;
 			RE::NiPoint3 goal;
 			if (a_goal) goal = a_goal->GetPosition();
 			auto route = TrailRoute(f, a_goal ? &goal : nullptr);
+			if (!a_goal) {
+				// to the player: stop a step short of them, not on top of them
+				auto pp = a_player->GetPosition();
+				while (!route.empty() && route.back().GetDistance(pp) < 140.0f) route.pop_back();
+				if (route.size() < 2) return false;
+			}
 			if (route.empty()) return false;
 			Driver::Order order;
 			order.kind = Driver::Kind::kPath;
 			order.target = a_player->GetHandle();
 			order.path = std::move(route);
-			order.speed = Tuning::Get().chargeSpeed;
+			order.speed = !a_goal && a_player->AsActorState()->IsSprinting() ? 715.0f : Tuning::Get().chargeSpeed;
 			order.duration = 20.0f;
 			if (!Driver::Start(f, order)) return false;
-			Debug(std::format("{} takes your route ({})", Name(f), a_why));
+			if (a_why == "footsteps") {
+				s.footstepsAt = g_time;
+				logger::info("{} takes your route (footsteps, {} points)", Name(f), order.path.size());
+			} else {
+				Debug(std::format("{} takes your route ({})", Name(f), a_why));
+			}
 			return true;
 		}
 
@@ -554,16 +568,28 @@ namespace Followers
 			return true;
 		}
 
-		// The area a follower keeps: anywhere around the player, close by.
-		Driver::Order FormationOrder()
+		// The area a follower keeps: anywhere around the player, close by (closer indoors, where rooms
+		// are cramped and a few steps away is often behind a pillar).
+		Driver::Order FormationOrder(bool a_indoors = false)
 		{
 			Driver::Order order;
 			order.kind = Driver::Kind::kFormation;
 			order.zoneAngle = 180.0f;
 			order.zoneHalf = 180.0f;
-			order.zoneNear = 120.0f;
-			order.zoneFar = 330.0f;
+			order.zoneNear = a_indoors ? 80.0f : 120.0f;
+			order.zoneFar = a_indoors ? 220.0f : 330.0f;
 			return order;
+		}
+
+		// Nothing in the way at chest height, at head height and (on level ground) at knee height:
+		// pillars, beams, low walls and clutter that a chest-high check alone misses.
+		bool ClearPath(RE::Actor* f, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to)
+		{
+			RE::NiPoint3 up{ 0.0f, 0.0f, 1.0f };
+			if (!Driver::ClearLine(f, a_from, a_to)) return false;
+			if (!Driver::ClearLine(f, a_from + up * 50.0f, a_to + up * 50.0f)) return false;
+			if (std::fabs(a_to.z - a_from.z) < 30.0f && !Driver::ClearLine(f, a_from - up * 25.0f, a_to - up * 25.0f)) return false;
+			return true;
 		}
 
 		RE::NiPoint3 SpotInWorld(RE::Actor* a_player, RE::NiPoint2 a_spot)
@@ -1361,6 +1387,11 @@ namespace Followers
 					if (!s.pathNoted && lastEnd == "blocked" && TryHop(f, s, player)) {
 						s.pathNoted = true;
 					}
+					// walk in the player's footsteps: their route is known to be walkable
+					if (!s.pathNoted && lastEnd == "blocked" && g_time - s.footstepsAt < 1.5f) ++s.footstepFails;
+					if (!s.pathNoted && s.footstepFails < 2 && RunTrail(f, s, player, nullptr, "footsteps", 0.5f)) {
+						s.pathNoted = true;
+					}
 					if (!s.pathNoted) {
 						// let the game's pathfinding (and traversal mods) get round it, longer each time
 						s.blockedCount = std::min(s.blockedCount + 1, 4);
@@ -1370,14 +1401,20 @@ namespace Followers
 				} else if (!s.pathNoted) {
 					s.blockedCount = 0;
 				}
-				Driver::Order order = FormationOrder();
+				auto          cell = player->GetParentCell();
+				Driver::Order order = FormationOrder(cell && cell->IsInteriorCell());
 				order.target = player->GetHandle();
 				RE::NiPoint3 nearest;
 				float        gap = Driver::ZoneGap(order, f, player, &nearest);
 				// a climb or a drop (the player up a rock, down a ledge) is the game's and traversal mods' job
 				float height = std::fabs(player->GetPosition().z - f->GetPosition().z);
-				if (g_time >= s.pathUntil && height < 80.0f && (gap > 40.0f || player->IsMoving()) &&
-					Driver::ClearLine(f, f->GetPosition(), nearest)) {
+				bool  clear = g_time >= s.pathUntil && height < 80.0f && (gap > 40.0f || player->IsMoving()) &&
+				             ClearPath(f, f->GetPosition(), nearest);
+				// something in the way of the straight line: take the player's footsteps instead
+				if (!clear && g_time >= s.pathUntil && gap > 40.0f && !Driver::IsDriving(f) && s.footstepFails < 2) {
+					RunTrail(f, s, player, nullptr, "footsteps", 0.5f);
+				}
+				if (clear && !Driver::IsDriving(f)) {
 					order.speed = Tuning::Get().chargeSpeed;  // a run
 					order.sprintSpeed = 715.0f;               // a player's sprint (measured)
 					order.looseness = s.looseness;
@@ -1409,7 +1446,11 @@ namespace Followers
 			} else if (!Driver::IsDriving(f)) {
 				s.stallSince = -1.0f;
 			}
-			if (s.formationDrive && Driver::IsDriving(f) && g_time - s.driveStarted > 3.0f) s.blockedCount = 0;
+			if (s.formationDrive && Driver::IsDriving(f) && g_time - s.driveStarted > 3.0f) {
+				s.blockedCount = 0;
+				s.footstepFails = 0;
+			}
+			if (!Driver::IsDriving(f) && g_time >= s.pathUntil && s.footstepFails >= 2 && g_time - s.footstepsAt > 6.0f) s.footstepFails = 0;
 			s.formationDrive = formation && Driver::IsDriving(f);
 
 			// ---- catch-up speed and teleport
