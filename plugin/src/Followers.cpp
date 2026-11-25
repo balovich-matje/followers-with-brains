@@ -974,6 +974,8 @@ namespace Followers
 			float nextOpening = 0.0f;    // looking for an opening to strike
 			float nextFlankCheck = 0.0f; // enemies getting behind her?
 			float nextRegroup = 0.0f;    // outnumbered: back to the player's side
+			float approachCheck = 0.0f;  // closing on a distant target? (dist then)
+			float approachDist = -1.0f;
 			float idleSince = -1.0f;     // her target standing idle since
 			RE::ActorHandle seen;      // an attack she has seen coming, to react to at reactAt
 			float reactAt = -1.0f;
@@ -1413,6 +1415,28 @@ namespace Followers
 							logger::info("{}: opening, {} {} ({})", Name(f), Dist(f, e) <= reach + 30.0f ? "strikes" : "steps in on", Name(e),
 								casting ? "it casts" : "it stands there");
 						}
+					}
+				}
+
+				// A target some way off and she isn't getting closer (the game's circling spirals in slowly):
+				// run at it, as a player would.
+				if (r.action == 0 && r.punishAt < 0.0f && !Driver::IsDriving(f) && !IsRanged(f) && g_time >= r.approachCheck) {
+					r.approachCheck = g_time + 1.0f;
+					auto  target = CombatTarget(f);
+					float d = Alive(target) ? Dist(f, target) : -1.0f;
+					float reach = MeleeReach(f);
+					if (d > reach + 180.0f && d < 2000.0f && r.approachDist > 0.0f && r.approachDist - d < 80.0f && Reachable(f, target)) {
+						Driver::Order order;
+						order.kind = Driver::Kind::kRunTo;
+						order.target = target->GetHandle();
+						order.speed = d > 600.0f ? 600.0f : Tuning::Get().closeSpeed;
+						order.sprint = d > 600.0f;
+						order.stopDistance = reach * 0.9f;
+						order.duration = 3.0f;
+						if (Driver::Start(f, order)) logger::info("{} runs at {} ({:.0f} away)", Name(f), Name(target), d);
+						r.approachDist = -1.0f;
+					} else {
+						r.approachDist = d;
 					}
 				}
 
