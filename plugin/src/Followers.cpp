@@ -2007,7 +2007,10 @@ namespace Followers
 					f->EvaluatePackage(true, false);
 				}
 				// formation looseness: weapon drawn = tight; sheathed = more relaxed
-				s.looseness = player->AsActorState()->IsWeaponDrawn() ? 1.0f : 1.4f;
+				// (indoors the rooms are too cramped for it: a few steps further is round a corner, out of sight)
+				auto here = player->GetParentCell();
+				bool inside = here && here->IsInteriorCell();
+				s.looseness = player->AsActorState()->IsWeaponDrawn() || inside ? 1.0f : 1.4f;
 				if (s.formationDrive) Driver::SetLooseness(f, s.looseness);
 
 				// a follower left in another area (a door the player went through) is brought over

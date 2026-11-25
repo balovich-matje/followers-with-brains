@@ -216,6 +216,8 @@ namespace Driver
 			RE::NiPoint3 hopFrom;
 			int         lastWeaponState = -1;
 			float       lastMoveKick = 0.0f;
+			float       nextSightCheck = 0.0f;  // formation: can she see the player from where she is?
+			bool        seesTarget = true;
 			float       moveRetryAt = 0.0f;     // the graph refused moveStart (mid-attack recovery): try again soon
 			int         moveRefusals = 0;
 			bool        standing = false;    // formation: legs were stopped, restart them when moving again
@@ -638,6 +640,13 @@ namespace Driver
 					float angleMargin = range > 1.0f ? margin / range / kDeg : 0.0f;
 					bool  inZone = std::fabs(AngleDiff(angle, centre)) <= zHalf + angleMargin && range >= zNear - margin &&
 					              range <= zFar + margin;
+					// keeping the player in view: round a corner or behind a pillar doesn't count as in place,
+					// however close (checked a few times a second)
+					if (d.elapsed >= d.nextSightCheck) {
+						d.nextSightCheck = d.elapsed + 0.25f;
+						d.seesTarget = ClearLine(a, pos, targetPos);
+					}
+					if (!d.seesTarget && range > d.order.zoneNear) inZone = false;
 					d.wasInZone = inZone;
 					if (range > 1500.0f) return "too far";
 
@@ -666,7 +675,9 @@ namespace Driver
 						d.stillFor = 0.0f;
 						// nearest point of the area
 						float ca = centre + std::clamp(AngleDiff(angle, centre), -zHalf, zHalf);
-						float cr = std::clamp(range, zNear, zFar);
+						// can't see the player: closer in, to the near edge (the nearest point of the area may be
+						// right where she stands, behind the pillar)
+						float cr = d.seesTarget ? std::clamp(range, zNear, zFar) : zNear;
 						aim = Polar(target, ca, cr, zh);
 						gain = 1.4f / loose;
 					}
