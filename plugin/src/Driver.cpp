@@ -200,6 +200,8 @@ namespace Driver
 			bool        idleCleared = false;
 			bool        stopSent = false;      // legs sent to the standing pose while standing in place
 			float       standingSince = 0.0f;
+			int         stepMode = 0;          // step back: 0 diagonal back, 1 sideways
+			int         stepTries = 0;         // step back: other ways out tried after a wall
 			// the facing this drive gives the body: kept here, not read back from the actor, so the AI
 			// turning her each frame (toward its own goal) can't drag her off the way she runs
 			float       facing = 0.0f;
@@ -480,6 +482,27 @@ namespace Driver
 			return nullptr;
 		}
 
+		// Step back direction: 0 = diagonal back (a player's backpedal), 1 = sideways with a little back.
+		RE::NiPoint3 StepDir(const RE::NiPoint3& a_toTarget, float a_weave, int a_side, int a_mode)
+		{
+			RE::NiPoint3 across{ -a_toTarget.y, a_toTarget.x, 0.0f };
+			RE::NiPoint3 dir = a_mode == 1 ? across * static_cast<float>(a_side) - a_toTarget * 0.25f :
+			                                 a_toTarget * -1.0f + across * (a_weave * static_cast<float>(a_side));
+			return dir / dir.Length();
+		}
+
+		// Room to step that way: nothing at chest or knee height, and ground under the end.
+		bool ClearStep(RE::Actor* a, RE::bhkWorld* a_world, const RE::NiPoint3& a_pos, const RE::NiPoint3& a_dir, float a_len)
+		{
+			auto solid = [&](const Hit& h) { return h.hit && h.ref != a && !(h.ref && h.ref->Is(RE::FormType::ActorCharacter)); };
+			RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f }, knee{ 0.0f, 0.0f, 30.0f };
+			if (solid(Cast(a, a_world, a_pos + chest, a_pos + chest + a_dir * a_len))) return false;
+			if (solid(Cast(a, a_world, a_pos + knee, a_pos + knee + a_dir * a_len))) return false;
+			auto end = a_pos + a_dir * a_len;
+			auto ground = Cast(a, a_world, end + RE::NiPoint3{ 0.0f, 0.0f, 80.0f }, end - RE::NiPoint3{ 0.0f, 0.0f, 160.0f });
+			return ground.hit && std::fabs(ground.point.z - a_pos.z) < 60.0f;
+		}
+
 		// One frame of one drive. Returns why it ends, or nullptr to go on.
 		const char* Step(RE::Actor* a, Drive& d, float a_delta)
 		{
@@ -551,10 +574,9 @@ namespace Driver
 					d.hasLastTarget = true;
 					float inside = std::max(0.0f, d.order.stopDistance - dist);
 					d.speedNow = std::min(d.order.speed, closing + inside * 4.0f);
-					// diagonal backpedal, as a player does it (measured ~450 units/s)
-					RE::NiPoint3 across{ -toDir.y, toDir.x, 0.0f };
-					RE::NiPoint3 back = toDir * -1.0f + across * (d.order.weave * static_cast<float>(d.side));
-					move = back / back.Length();
+					// diagonal backpedal, as a player does it (measured ~450 units/s); sideways when a wall
+					// is behind (see the wall check below)
+					move = StepDir(toDir, d.order.weave, d.side, d.stepMode);
 					face = Heading(toDir);
 					break;
 				}
@@ -684,7 +706,28 @@ namespace Driver
 			if (ahead.hit && ahead.ref != a) {
 				if (ahead.ref == target && d.order.kind != Kind::kFormation) return "arrived";
 				// people (the player, other followers) step aside or get pushed; only walls and rocks stop a drive
-				if (!ahead.ref || !ahead.ref->Is(RE::FormType::ActorCharacter)) return "blocked";
+				if (!ahead.ref || !ahead.ref->Is(RE::FormType::ActorCharacter)) {
+					// stepping out of a swing with a wall behind: the other diagonal, or sideways, as a player
+					// would; give up only when boxed in
+					bool found = false;
+					if (d.order.kind == Kind::kStepBack && d.stepTries < 3) {
+						static constexpr int kCandidates[][2] = { { -1, 0 }, { 1, 1 }, { -1, 1 } };  // {side flip, mode}
+						for (auto [flip, mode] : kCandidates) {
+							int  side = flip < 0 ? -d.side : d.side;
+							auto dir = StepDir(toDir, d.order.weave, side, mode);
+							if (side == d.side && mode == d.stepMode) continue;
+							if (!ClearStep(a, world, pos, dir, 120.0f)) continue;
+							d.side = side;
+							d.stepMode = mode;
+							move = dir;
+							next = pos + move * step;
+							found = true;
+							break;
+						}
+						++d.stepTries;
+					}
+					if (!found) return "blocked";
+				}
 			}
 			// stay on the ground; don't step off ledges or up big steps
 			auto ground = Cast(a, world, next + RE::NiPoint3{ 0.0f, 0.0f, 80.0f }, next - RE::NiPoint3{ 0.0f, 0.0f, 160.0f });
@@ -811,6 +854,27 @@ namespace Driver
 		d = Drive{};
 		d.order = a_order;
 		d.side = (std::rand() % 2) ? 1 : -1;
+		// stepping out of a swing: pick a way with room for it (walls, pillars, clutter behind her)
+		if (a_order.kind == Kind::kStepBack) {
+			auto target = a_order.target.get();
+			auto cell = a_actor->GetParentCell();
+			auto world = cell ? cell->GetbhkWorld() : nullptr;
+			if (target && world) {
+				RE::NiPoint3 to = target->GetPosition() - a_actor->GetPosition();
+				to.z = 0.0f;
+				if (to.Length() > 1.0f) {
+					to = to / to.Length();
+					const std::pair<int, int> options[] = { { d.side, 0 }, { -d.side, 0 }, { d.side, 1 }, { -d.side, 1 } };
+					for (auto [side, mode] : options) {
+						if (ClearStep(a_actor, world, a_actor->GetPosition(), StepDir(to, a_order.weave, side, mode), 150.0f)) {
+							d.side = side;
+							d.stepMode = mode;
+							break;
+						}
+					}
+				}
+			}
+		}
 		SetDriven(a_actor->GetFormID(), true);
 		return true;
 	}
