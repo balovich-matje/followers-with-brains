@@ -198,6 +198,8 @@ namespace Driver
 			float       lastSpeed = 0.0f;
 			bool        hopStarted = false;
 			bool        idleCleared = false;
+			bool        stopSent = false;      // legs sent to the standing pose while standing in place
+			float       standingSince = 0.0f;
 			// the facing this drive gives the body: kept here, not read back from the actor, so the AI
 			// turning her each frame (toward its own goal) can't drag her off the way she runs
 			float       facing = 0.0f;
@@ -711,8 +713,15 @@ namespace Driver
 			// Restart the legs when they may have dropped to a standing pose: setting off again after
 			// standing, drawing or sheathing a weapon (resets the graph), and every second while moving.
 			if (speed < 20.0f) {
+				if (!d.standing) d.standingSince = d.elapsed;
 				d.standing = true;
+				// standing in her spot for a moment: legs to the standing pose (or they shuffle in place)
+				if (!d.stopSent && d.elapsed - d.standingSince > 0.3f) {
+					Send(a, "moveStop"sv);
+					d.stopSent = true;
+				}
 			} else if (speed > 60.0f) {
+				d.stopSent = false;
 				auto weaponState = static_cast<int>(state->GetWeaponState());
 				// setting off: end any idle she was playing while standing (or she slides in its pose)
 				if (d.standing || !d.idleCleared) {

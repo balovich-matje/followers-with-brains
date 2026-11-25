@@ -205,8 +205,11 @@ namespace Lab
 			}
 		}
 
+		std::unordered_map<RE::FormID, float> g_extraHealth;
+
 		void AddHealth(RE::Actor* a, float a_amount)
 		{
+			g_extraHealth[a->GetFormID()] += a_amount;
 			auto avo = a->AsActorValueOwner();
 			avo->ModActorValue(RE::ActorValue::kHealth, a_amount);
 			avo->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, 1e6f);
@@ -325,6 +328,14 @@ namespace Lab
 	}
 
 	bool On() { return g_on; }
+
+	void ForgetHealth() { g_extraHealth.clear(); }
+
+	float ExtraHealth(RE::Actor* a_actor)
+	{
+		auto it = a_actor ? g_extraHealth.find(a_actor->GetFormID()) : g_extraHealth.end();
+		return it == g_extraHealth.end() ? 0.0f : it->second;
+	}
 
 	void Install()
 	{

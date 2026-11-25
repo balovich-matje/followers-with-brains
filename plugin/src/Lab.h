@@ -11,4 +11,7 @@ namespace Lab
 	void Shutdown();            // before a hot reload
 	void Frame(float a_delta);  // every frame, main thread
 	bool On();
+	// Health a lab command added to this actor (so reactions can judge hits by their real health).
+	float ExtraHealth(RE::Actor* a_actor);
+	void  ForgetHealth();  // after a load: the save has none of it
 }

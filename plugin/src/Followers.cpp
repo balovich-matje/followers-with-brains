@@ -999,7 +999,8 @@ namespace Followers
 			bool  power = data && data->data.flags.any(RE::AttackData::AttackFlag::kPowerAttack);
 			float mult = data ? std::max(1.0f, data->data.damageMult) : 1.0f;
 			float hit = Loadout::HitDamage(e, f, e->GetEquippedEntryData(false)) * mult;
-			float health = f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+			// (minus health a test command added: hits are judged against her real health)
+			float health = std::max(1.0f, f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth) - Lab::ExtraHealth(f));
 			float share = health > 0.0f ? hit / health : 1.0f;
 			// Bashing needs a block: a shield, a two-handed weapon, or one weapon with the other hand free.
 			// Dual wielders can't block, so they can't bash. Enemies that shrug bashes off are remembered.
@@ -2020,6 +2021,7 @@ namespace Followers
 	void Reset()
 	{
 		Tuning::Load();
+		Lab::ForgetHealth();
 		{
 			std::scoped_lock lock{ g_lock };
 			g_queue.clear();
