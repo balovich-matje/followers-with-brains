@@ -1240,6 +1240,8 @@ namespace Followers
 					if (Alive(e) && (r.action == 0 || r.action == 4) &&
 						(st == RE::ATTACK_STATE_ENUM::kDraw || st == RE::ATTACK_STATE_ENUM::kSwing)) {
 						ReactToAttack(f, e, r);
+					} else if (Alive(e)) {
+						logger::info("{} reacts too late to {}'s attack", Name(f), Name(e));
 					}
 				}
 
