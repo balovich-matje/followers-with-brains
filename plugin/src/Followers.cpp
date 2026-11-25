@@ -1012,6 +1012,26 @@ namespace Followers
 			                (rightWeap && rightWeap->IsMelee() && !left);
 			bool  bashable = canBlock && g_bashFails[e->GetFormID()] < 2 && Dist(f, e) < 200.0f;
 
+			// A player's read of the moment: if she can bring it down with the hits she has time for before
+			// its swing lands, dodging only wastes the opening. Keep hitting.
+			if (!IsRanged(f) && rightWeap && rightWeap->IsMelee()) {
+				float reach = std::max(120.0f, rightWeap->GetReach() * 140.0f);
+				float window = power ? 0.9f : 0.5f;                                   // windup left, roughly
+				float swing = 0.7f / std::max(0.5f, rightWeap->GetSpeed());          // seconds per swing
+				bool  free = f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone;
+				int   hits = static_cast<int>(window / swing) + (free ? 1 : 0);
+				float mine = hits * Loadout::HitDamage(f, e, f->GetEquippedEntryData(false));
+				float left = e->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+				if (hits > 0 && Dist(f, e) <= reach + 20.0f && mine >= left * Tuning::Get().finishMargin) {
+					if (free) f->NotifyAnimationGraph("attackStart"sv);
+					r.action = 0;
+					r.cooldownUntil = g_time + 0.5f;
+					Debug(std::format("{}: finishes {} before its {} lands ({} hits, {:.0f} dmg vs {:.0f} hp)", Name(f), Name(e),
+						power ? "power attack" : "swing", hits, mine, left));
+					return;
+				}
+			}
+
 			const char* what = nullptr;
 			if (power && bashable) {
 				f->NotifyAnimationGraph("blockStart"sv);

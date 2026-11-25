@@ -22,6 +22,7 @@ namespace Tuning
 			{ "DodgeChance"sv, &Values::dodgeChance },
 			{ "DodgeCooldown"sv, &Values::dodgeCooldown },
 			{ "CloseSpeed"sv, &Values::closeSpeed },
+			{ "FinishMargin"sv, &Values::finishMargin },
 		};
 
 		std::string Trim(std::string_view a_text)
@@ -61,6 +62,14 @@ namespace Tuning
 	const Values& Get() { return g_values; }
 
 	void SetExtraFile(std::filesystem::path a_path) { g_extra = std::move(a_path); }
+
+	bool IsKey(std::string_view a_key)
+	{
+		for (auto& f : kFields) {
+			if (f.name == a_key) return true;
+		}
+		return false;
+	}
 
 	void Load()
 	{

@@ -18,11 +18,14 @@ namespace Tuning
 		float dodgeShare = 0.2f;      // dodge hits above this share of current health (power attacks always)
 		float dodgeChance = 75.0f;    // percent
 		float dodgeCooldown = 2.5f;   // seconds between dodges
+		float finishMargin = 1.1f;    // keep attacking instead of dodging when her hits before the enemy's
+		                              // swing lands come to this much of its health (1.1 = 10% to spare)
 		// closing back in to strike
 		float closeSpeed = 380.0f;    // units/s
 	};
 
 	const Values& Get();
 	void          Load();
-	void          SetExtraFile(std::filesystem::path a_path);  // read after the normal file (test runs)
+	void          SetExtraFile(std::filesystem::path a_path);  // read after the normal file (test runs, lab)
+	bool          IsKey(std::string_view a_key);
 }

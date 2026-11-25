@@ -3,6 +3,7 @@
 #include "Followers.h"
 #include "Papyrus.h"
 #include "Settings.h"
+#include "Tuning.h"
 
 namespace Lab
 {
@@ -198,6 +199,16 @@ namespace Lab
 			if (a_token == "bandit") return 0x39D21;
 			if (a_token == "archer") return 0x37C47;
 			if (a_token == "brute") return 0x3DE83;
+			// creatures and vampires (Skyrim.esm; levels as RFAB sets them)
+			if (a_token == "sabrecat") return 0x23AB5;    // 20
+			if (a_token == "snowsabre") return 0x23AB6;   // 40
+			if (a_token == "bear") return 0x23A8A;        // 20
+			if (a_token == "cavebear") return 0x23A8B;    // 30
+			if (a_token == "snowbear") return 0x23A8C;    // 40
+			if (a_token == "troll") return 0x23ABA;       // 20
+			if (a_token == "frosttroll") return 0x23ABB;  // 40
+			if (a_token == "vampire75") return 0x2EAC1;   // Volkihar clan (EncVampire06BossNordM)
+			if (a_token == "vampire90") return 0x3392F;   // night hunter (EncVampire06NordF)
 			try {
 				return static_cast<RE::FormID>(std::stoul(std::string{ a_token }, nullptr, 16));
 			} catch (...) {
@@ -291,6 +302,35 @@ namespace Lab
 					Papyrus::StopCombat(a);
 					Say(std::format("{} stops fighting", a->GetDisplayFullName()));
 				}
+			} else if (cmd == "tune" && words.size() >= 2) {
+				// tune <Key> <value> | tune <Key> (back to default) | tune reset: written to the lab's
+				// tuning.ini, which is read after the normal tuning (kept across loads and reloads)
+				auto                                     path = g_dir / "tuning.ini";
+				std::vector<std::pair<std::string, std::string>> values;
+				{
+					std::ifstream in{ path };
+					for (std::string line; std::getline(in, line);) {
+						auto eq = line.find('=');
+						if (eq == std::string::npos) continue;
+						auto k = line.substr(0, eq), v = line.substr(eq + 1);
+						std::erase(k, ' ');
+						std::erase(v, ' ');
+						if (words[1] != "reset" && k != words[1]) values.emplace_back(k, v);
+					}
+				}
+				if (words[1] != "reset" && !Tuning::IsKey(words[1])) {
+					Say(std::format("tune: unknown value {}", words[1]));
+					return;
+				}
+				if (words[1] != "reset" && words.size() >= 3) values.emplace_back(words[1], words[2]);
+				{
+					std::ofstream out{ path, std::ios::trunc };
+					out << "; lab tuning (tools/fwb-lab-send.sh \"tune Key value\")\n";
+					for (auto& [k, v] : values) out << k << " = " << v << "\n";
+				}
+				Tuning::Load();
+				Say(words[1] == "reset" ? std::string{ "tuning back to defaults" } :
+				    words.size() >= 3   ? std::format("{} = {}", words[1], words[2]) : std::format("{} back to default", words[1]));
 			} else if (cmd == "set" && words.size() >= 3) {
 				// set <Setting> <value>: same as changing it in the MCM
 				if (words[2].find('.') != std::string::npos) {
@@ -368,6 +408,8 @@ namespace Lab
 		auto events = RE::ScriptEventSourceHolder::GetSingleton();
 		events->AddEventSink<RE::TESHitEvent>(Events::Get());
 		events->AddEventSink<RE::TESDeathEvent>(Events::Get());
+		Tuning::SetExtraFile(g_dir / "tuning.ini");
+		Tuning::Load();
 		g_on = true;
 		logger::info("LAB on: {}", session.string());
 	}
