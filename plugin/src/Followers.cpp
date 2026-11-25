@@ -736,6 +736,7 @@ namespace Followers
 		{
 			float hpAtFirst = 0.0f;
 			float firstTime = -100.0f;
+			float lastTime = -100.0f;
 			int   hits = 0;
 		};
 		std::map<std::pair<RE::FormID, RE::FormID>, HitTally> g_hitTally;      // (follower, enemy)
@@ -753,8 +754,10 @@ namespace Followers
 			auto  avo = e->AsActorValueOwner();
 			float hp = avo->GetActorValue(RE::ActorValue::kHealth);
 			auto& t = g_hitTally[{ f->GetFormID(), e->GetFormID() }];
+			if (g_time - t.lastTime < 0.3f) return;  // one swing: the weapon and its enchantments, perks
+			t.lastTime = g_time;
 			if (g_time - t.firstTime > 12.0f) {
-				t = { hp, g_time, 1 };
+				t = { hp, g_time, g_time, 1 };
 				return;
 			}
 			if (++t.hits < 4) return;
@@ -763,7 +766,7 @@ namespace Followers
 				g_futileUntil[{ f->GetFormID(), Experience::KindOf(e) }] = g_time + 45.0f;
 				Debug(std::format("{} can't hurt {} ({} hits, health didn't move): leaves it alone", Name(f), Name(e), t.hits));
 			}
-			t = { hp, g_time, 1 };
+			t = { hp, g_time, g_time, 1 };
 		}
 
 		RE::Actor* PickEnemy(RE::Actor* a, const Scan& a_scan, RE::Actor* a_exclude = nullptr, float a_maxFromPlayer = kEnemyRange)
@@ -970,6 +973,7 @@ namespace Followers
 				break;
 
 			case EventType::kMeleeHit:  // a = attacker, b = victim
+				if (a && b && IsFollower(a, player) && b != player && !b->IsPlayerTeammate() && Alive(b)) TallyHit(a, b);
 				if (a && b && IsFollower(b, player)) {
 					auto& s = g_state[b->GetFormID()];
 					s.lastMeleeHitTime = g_time;
@@ -983,7 +987,6 @@ namespace Followers
 					g_pendingPlayerHits.push_back({ b->GetHandle(), g_time + 0.15f });
 				} else if (IsFollower(a, player)) {
 					g_state[a->GetFormID()].missedSwings = 0;
-					if (b != player && !b->IsPlayerTeammate() && Alive(b)) TallyHit(a, b);
 				}
 				if (IsFollower(b, player) && a != player && !a->IsPlayerTeammate()) {
 					auto& s = g_state[b->GetFormID()];
