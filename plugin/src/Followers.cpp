@@ -59,6 +59,7 @@ namespace Followers
 			RE::NiPoint3 followSample;
 			float followSampleTime = -100.0f;
 			float nextTrail = 0.0f;
+			float nextGrind = 0.0f;        // choosing whom to cut down next
 			float hazardUntil = 0.0f;      // hurt by a trap: the game's own movement until then
 			RE::NiPoint3 bodyCheckPos;     // running in place (a body in the way)?
 			float slowSince = -1.0f;
@@ -1578,6 +1579,104 @@ namespace Followers
 			}
 		}
 
+		// ------------------------------------------------------------------ cutting enemies down
+		float MeleeReach(RE::Actor* f)
+		{
+			auto w = f->GetEquippedObject(false) ? f->GetEquippedObject(false)->As<RE::TESObjectWEAP>() : nullptr;
+			return w ? std::max(120.0f, w->GetReach() * 140.0f) : 150.0f;
+		}
+
+		// Roughly how long she needs to kill e from where she stands: walking up plus her swings.
+		float KillTime(RE::Actor* f, RE::Actor* e)
+		{
+			auto  w = f->GetEquippedObject(false) ? f->GetEquippedObject(false)->As<RE::TESObjectWEAP>() : nullptr;
+			float hit = Loadout::HitDamage(f, e, f->GetEquippedEntryData(false));
+			if (hit <= 1.0f) return 99.0f;
+			float hp = e->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+			float hits = std::ceil(std::max(1.0f, hp) / hit);
+			float swing = 0.7f / std::max(0.5f, w ? w->GetSpeed() : 1.0f);
+			float walk = std::max(0.0f, Dist(f, e) - MeleeReach(f)) / 400.0f;
+			return hits * swing + walk;
+		}
+
+		bool Reachable(RE::Actor* f, RE::Actor* e)
+		{
+			return std::fabs(e->GetPosition().z - f->GetPosition().z) < 120.0f && Driver::ClearLine(f, f->GetPosition(), e->GetPosition());
+		}
+
+		// Against enemies she knows to be harmless, a player stops fencing and mows them down: finish
+		// whoever is on their knees first, then always the quickest kill in reach, no pause between them,
+		// and walk right up to a lone one so every swing lands. Returns true when it moved her this tick.
+		bool Meatgrind(RE::Actor* f, FollowerState& s, const Scan& a_scan, RE::Actor* a_target)
+		{
+			if (g_time < s.nextGrind || IsRanged(f) || Driver::IsDriving(f)) return false;
+			s.nextGrind = g_time + 0.25f;
+			float reach = MeleeReach(f);
+			bool  free = f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone && !f->IsBlocking();
+
+			// someone on their knees nearby: finish them before they get up
+			RE::Actor* downed = nullptr;
+			for (auto e : a_scan.enemies) {
+				if (Alive(e) && e->AsActorState()->IsBleedingOut() && Dist(f, e) < 500.0f && Reachable(f, e) &&
+					(!downed || Dist(f, e) < Dist(f, downed))) {
+					downed = e;
+				}
+			}
+			if (downed) {
+				if (CombatTarget(f) != downed && g_time - s.lastRetarget > 0.5f) StartCombat(f, s, downed, "finishing a downed enemy");
+				if (Dist(f, downed) <= reach + 30.0f) {
+					if (free) StrikeAt(f, downed);
+				} else {
+					Driver::Order order;
+					order.kind = Driver::Kind::kRunTo;
+					order.target = downed->GetHandle();
+					order.speed = Tuning::Get().closeSpeed;
+					order.stopDistance = reach * 0.8f;
+					order.duration = 1.5f;
+					if (Driver::Start(f, order)) logger::info("{} goes to finish {}", Name(f), Name(downed));
+				}
+				return true;
+			}
+
+			if (!Alive(a_target) || !Experience::StanceVs(f, a_target).relaxed) return false;
+
+			// the quickest kill among the harmless ones around her
+			RE::Actor* best = a_target;
+			float      bestTime = KillTime(f, a_target);
+			int        others = 0;
+			for (auto e : a_scan.enemies) {
+				if (!Alive(e) || e == a_target) continue;
+				float d = Dist(f, e);
+				if (d < 1000.0f) ++others;
+				if (d > 700.0f || !Experience::StanceVs(f, e).relaxed || !Reachable(f, e)) continue;
+				float t = KillTime(f, e);
+				if (t + 0.5f < bestTime) {
+					best = e;
+					bestTime = t;
+				}
+			}
+			if (best != a_target && g_time - s.lastRetarget > 0.8f) {
+				StartCombat(f, s, best, std::format("quickest kill, {:.1f}s", bestTime));
+				return false;
+			}
+
+			// a lone harmless enemy: right up close, so nothing whiffs
+			if (others == 0 && free && Dist(f, a_target) > reach + 20.0f && Dist(f, a_target) < 600.0f &&
+				a_target->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone && Reachable(f, a_target)) {
+				Driver::Order order;
+				order.kind = Driver::Kind::kRunTo;
+				order.target = a_target->GetHandle();
+				order.speed = Tuning::Get().closeSpeed;
+				order.stopDistance = reach * 0.75f;
+				order.duration = 1.2f;
+				if (Driver::Start(f, order)) {
+					logger::info("{} closes in on {}", Name(f), Name(a_target));
+					return true;
+				}
+			}
+			return false;
+		}
+
 		void UpdateFollower(RE::Actor* f, int a_slot, const Scan& a_scan)
 		{
 			auto& cfg = Settings::Get();
@@ -1874,6 +1973,7 @@ namespace Followers
 				return;
 			}
 			if (!target) return;
+			if (cfg.reflexes && Meatgrind(f, s, a_scan, target)) return;
 
 			// ---- a downed (bleeding out, kneeling) enemy: close in and finish it, don't stand back
 			if (cfg.combatMovement && target->AsActorState()->IsBleedingOut() && !IsRanged(f) && Dist(f, target) < 900.0f) {
