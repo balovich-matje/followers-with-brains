@@ -106,6 +106,7 @@ namespace Followers
 			float dealt[2]{};
 			float heldTime[2]{};
 			int   hits[2]{};
+			RE::FormID measuredWith[2]{};  // the weapon those numbers were measured with
 			float prevTargetDist = -1.0f;
 			float targetDistTime = -100.0f;
 			bool  closing = false;
@@ -1887,6 +1888,16 @@ namespace Followers
 		void UpdateWeapons(RE::Actor* f, FollowerState& s, RE::Actor* a_target, bool a_retreating)
 		{
 			auto  options = GetLoadout(f, s);
+			// a different weapon of a kind: what she did with the old one says nothing about it
+			RE::FormID now[2] = { options.melee ? options.melee->GetFormID() : 0, options.bow ? options.bow->GetFormID() : 0 };
+			for (int k = 0; k < 2; ++k) {
+				if (now[k] != s.measuredWith[k]) {
+					s.measuredWith[k] = now[k];
+					s.dealt[k] = 0.0f;
+					s.heldTime[k] = 0.0f;
+					s.hits[k] = 0;
+				}
+			}
 			options.meleeScore = Dps(s, 0, options.meleeScore);
 			options.rangedScore = Dps(s, 1, options.rangedScore);
 			if (!options.HasRanged() || !options.HasMelee() || !a_target) return;
@@ -1916,7 +1927,8 @@ namespace Followers
 					auto e = Get(h);
 					if (Alive(e) && CombatTarget(e) == f && Dist(f, e) < 600.0f) onHer = true;
 				}
-				bool pressured = s.pressure.size() >= 3 && NearestEnemyDist(f) < 400.0f;
+				// (kept up for a while, not just the opening seconds of a fight when everyone runs at her)
+				bool pressured = s.pressure.size() >= 4 && s.pressure.back() - s.pressure.front() >= 5.0f && NearestEnemyDist(f) < 400.0f;
 				bool meleeWorth = options.HasMelee() && options.meleeScore >= options.rangedScore * 0.6f;
 				if (pressured && meleeWorth) {
 					s.meleeUntil = g_time + 6.0f;
