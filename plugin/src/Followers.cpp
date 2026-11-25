@@ -999,6 +999,8 @@ namespace Followers
 			bool  power = data && data->data.flags.any(RE::AttackData::AttackFlag::kPowerAttack);
 			float mult = data ? std::max(1.0f, data->data.damageMult) : 1.0f;
 			float hit = Loadout::HitDamage(e, f, e->GetEquippedEntryData(false)) * mult;
+			// creatures (claws, bites) and fists: no weapon to work it out from, so their unarmed damage
+			if (hit <= 0.0f) hit = std::max(1.0f, e->AsActorValueOwner()->GetActorValue(RE::ActorValue::kUnarmedDamage)) * mult;
 			// (minus health a test command added: hits are judged against her real health)
 			float health = std::max(1.0f, f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth) - Lab::ExtraHealth(f));
 			float share = health > 0.0f ? hit / health : 1.0f;
