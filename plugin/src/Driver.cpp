@@ -297,7 +297,10 @@ namespace Driver
 		void End(RE::Actor* a_actor, Drive& a_drive, std::string_view a_why)
 		{
 			auto id = a_actor->GetFormID();
-			if (a_drive.sprinting) {
+			bool graphSprint = false;
+			a_actor->GetGraphVariableBool("IsSprinting", graphSprint);
+			// also a sprint the game started before the drive: its SprintStop was refused while driven
+			if (a_drive.sprinting || graphSprint || a_actor->AsActorState()->IsSprinting()) {
 				a_actor->AsActorState()->actorState1.sprinting = 0;
 				a_actor->SetGraphVariableBool("IsSprinting", false);
 				Send(a_actor, "SprintStop"sv);
@@ -661,7 +664,19 @@ namespace Driver
 				Send(a, "SprintStop"sv);
 				d.sprinting = false;
 			}
-			if ((d.order.sprint || (d.order.kind == Kind::kFormation && d.wantSprint)) && !d.sprinting) {
+			bool wantSprint = d.order.sprint || (d.order.kind == Kind::kFormation && d.wantSprint);
+			if (!wantSprint && !d.sprinting) {
+				// a sprint the game started before this drive: the game's SprintStop is refused while
+				// driven, so it would never end (sprinting on the spot)
+				bool graphSprint = false;
+				a->GetGraphVariableBool("IsSprinting", graphSprint);
+				if (graphSprint || state->IsSprinting()) {
+					state->actorState1.sprinting = 0;
+					a->SetGraphVariableBool("IsSprinting", false);
+					Send(a, "SprintStop"sv);
+				}
+			}
+			if (wantSprint && !d.sprinting) {
 				state->actorState1.sprinting = 1;
 				bool flag = a->SetGraphVariableBool("IsSprinting", true);
 				bool took = Send(a, "SprintStart"sv);
