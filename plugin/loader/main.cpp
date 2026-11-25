@@ -157,13 +157,20 @@ namespace
 	}
 
 	// ------------------------------------------------------------------ forwarding
+	void RegisterCommand();
+
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
 		switch (a_msg->type) {
 		case SKSE::MessagingInterface::kDataLoaded:
 			g_dataLoaded = true;
 			if (g_brain.dataLoaded) g_brain.dataLoaded();
-			if (!g_labDir.empty()) WatchBrain();
+			if (!g_labDir.empty()) {
+				// taken over only now: done at plugin load (before the game had set up its own console
+				// commands), it hung the game's startup more often than not
+				RegisterCommand();
+				WatchBrain();
+			}
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 			if (g_brain.postLoadGame) g_brain.postLoadGame();
@@ -324,7 +331,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 
 	if (std::filesystem::exists(kLabConfig)) {
 		ReadLabConfig();
-		if (!g_labDir.empty()) RegisterCommand();
 	}
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	SKSE::GetPapyrusInterface()->Register(RegisterPapyrus);
