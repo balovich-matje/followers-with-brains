@@ -110,7 +110,8 @@ namespace Experience
 		if (Tuning::Get().practice > 0.0f) return { 1.0f, 0.0f };  // test switch: perfect reads
 		auto  it = g_data.find({ a_follower->GetFormID(), KindOf(a_enemy) });
 		float xp = it == g_data.end() ? 0.0f : it->second.xp * Kept(it->second);
-		float learned = 1.0f - std::exp(-xp / 15.0f);  // ~65% learned after one fight, ~95% after a few
+		// a fight is some 20-30 attacks: ~45% learned after one, ~85% after three or four
+		float learned = 1.0f - std::exp(-xp / std::max(1.0f, Tuning::Get().learnScale));
 		return { 0.3f + 0.55f * learned, 0.05f + 0.22f * (1.0f - learned) };
 	}
 

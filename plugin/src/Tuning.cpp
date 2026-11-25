@@ -25,6 +25,7 @@ namespace Tuning
 			{ "FinishMargin"sv, &Values::finishMargin },
 			{ "RollChance"sv, &Values::rollChance },
 			{ "Practice"sv, &Values::practice },
+			{ "LearnScale"sv, &Values::learnScale },
 		};
 
 		std::string Trim(std::string_view a_text)
