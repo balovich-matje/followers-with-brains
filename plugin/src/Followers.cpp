@@ -1207,6 +1207,8 @@ namespace Followers
 
 		void ReactToAttack(RE::Actor* f, RE::Actor* e, ReflexState& r)
 		{
+			// down on her knees or knocked flat: nothing she can do about it
+			if (f->AsActorState()->IsBleedingOut() || f->AsActorState()->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal) return;
 			// A spell or a shout being cast is no swing to get out of: its hands are busy, so hit it.
 			if (IsCasting(e)) {
 				auto  weap = f->GetEquippedObject(false);
@@ -1365,7 +1367,7 @@ namespace Followers
 				auto& r = g_reflex[f->GetFormID()];
 				// knocked down or getting up: nothing to do until she's on her feet (stepping in only
 				// started drives that ended at once, over and over)
-				if (f->AsActorState()->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal) continue;
+				if (f->AsActorState()->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal || f->AsActorState()->IsBleedingOut()) continue;
 
 				if (r.action == 3 && r.bashPending && g_time - r.bashTime >= 0.08f) {
 					r.bashPending = false;
@@ -1589,7 +1591,8 @@ namespace Followers
 						auto& gb = g_guardBreaks[{ f->GetFormID(), kind }];
 						bool  worth = gb.tries < 3 || gb.staggers * 3 >= gb.tries;
 						float stamina = f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kStamina);
-						if (worth && g_time - r.blockSince > 0.3f && stamina >= 30.0f) {
+						// (bosses raise the shield only for a moment, often to bash: a player answers at once)
+						if (worth && g_time - r.blockSince > 0.15f && stamina >= 30.0f) {
 							if (f->IsBlocking()) f->NotifyAnimationGraph("blockStop"sv);
 							RE::NiPoint3 to = e->GetPosition() - f->GetPosition();
 							if (to.x * to.x + to.y * to.y > 1.0f) f->SetRotationZ(std::atan2(to.x, to.y));
