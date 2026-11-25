@@ -481,7 +481,7 @@ namespace Followers
 			if (a_why == "footsteps") {
 				// footsteps runs that hit something right away: give up on them for a while
 				if (g_time - s.footstepsAt < 1.5f && std::string_view{ Driver::LastEnd(f) } == "blocked") ++s.footstepFails;
-				if (s.footstepFails >= 2 || Dist(f, a_player) < 300.0f) return false;
+				if (s.footstepFails >= 2 || Dist(f, a_player) < 200.0f) return false;
 			}
 			s.nextTrail = g_time + a_cooldown;
 			RE::NiPoint3 goal;
@@ -1411,6 +1411,11 @@ namespace Followers
 				ClearOffset(f, s);
 			}
 			bool formation = cfg.outsideMovement && !busy && sameSpace && !inCombat && !recalling && mode != 2 && !waiting && dist < 1500.0f;
+			// left to the game's pathfinding after a block, but falling behind: her footsteps instead
+			if (formation && !Driver::IsDriving(f) && g_time < s.pathUntil && dist > 350.0f && s.footstepFails < 2 &&
+				RunTrail(f, s, player, nullptr, "footsteps", 0.5f)) {
+				s.pathUntil = 0.0f;
+			}
 			if (formation && !Driver::IsDriving(f) && g_time >= s.pathUntil) {
 				std::string_view lastEnd = Driver::LastEnd(f);
 				if (lastEnd == "blocked" || lastEnd == "edge" || lastEnd == "step" || lastEnd == "too far") {
