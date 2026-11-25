@@ -760,7 +760,9 @@ namespace Driver
 			// stay on the ground; don't step off ledges or up big steps
 			auto ground = Cast(a, world, next + RE::NiPoint3{ 0.0f, 0.0f, 80.0f }, next - RE::NiPoint3{ 0.0f, 0.0f, 160.0f });
 			if (!ground.hit) return "edge";
-			if (ground.point.z - pos.z > 45.0f || pos.z - ground.point.z > 90.0f) return "step";
+			// a stair step down is a few units per frame even at a sprint; more than that is a ledge (she
+			// ran off one at 590 u/s with the old 90-unit allowance)
+			if (ground.point.z - pos.z > 45.0f || pos.z - ground.point.z > 35.0f + step) return "step";
 			next.z = ground.point.z;
 
 
