@@ -370,6 +370,56 @@ namespace Driver
 		}
 
 		// Run through the order's points in turn (they lie on walkable ground: a route someone walked).
+		// The sprint animation while a drive wants it (and ending it when not): the graph's sprint state
+		// has to be kept alive by hand, since the game clears it for an actor it doesn't move itself.
+		void Sprint(RE::Actor* a, Drive& d, bool a_want)
+		{
+			auto state = a->AsActorState();
+			if (d.sprinting && !a_want) {
+				state->actorState1.sprinting = 0;
+				a->SetGraphVariableBool("IsSprinting", false);
+				Send(a, "SprintStop"sv);
+				d.sprinting = false;
+				return;
+			}
+			if (!a_want) {
+				// a sprint the game started before this drive: the game's SprintStop is refused while
+				// driven, so it would never end (sprinting on the spot)
+				bool graphSprint = false;
+				a->GetGraphVariableBool("IsSprinting", graphSprint);
+				if (graphSprint || state->IsSprinting()) {
+					state->actorState1.sprinting = 0;
+					a->SetGraphVariableBool("IsSprinting", false);
+					Send(a, "SprintStop"sv);
+				}
+				return;
+			}
+			if (!d.sprinting) {
+				state->actorState1.sprinting = 1;
+				bool flag = a->SetGraphVariableBool("IsSprinting", true);
+				bool took = Send(a, "SprintStart"sv);
+				bool readBack = false;
+				a->GetGraphVariableBool("IsSprinting", readBack);
+				d.sprinting = true;
+				if (!d.sprintLogged) {
+					logger::info("{}: sprint: IsSprinting variable {}, read back {}, SprintStart event {}", a->GetDisplayFullName(),
+						flag ? "set" : "not in this graph", readBack, took ? "taken" : "refused");
+					d.sprintLogged = true;
+				}
+				return;
+			}
+			// the game clears the sprint state on its own: keep it, and restart the sprint if the graph left it
+			state->actorState1.sprinting = 1;
+			bool still = false;
+			a->GetGraphVariableBool("IsSprinting", still);
+			if (!still && d.elapsed - d.lastSprintKick > 0.3f) {
+				a->SetGraphVariableBool("IsSprinting", true);
+				Send(a, "SprintStart"sv);
+				d.lastSprintKick = d.elapsed;
+				++d.sprintKicks;
+			}
+		}
+
 		const char* PathStep(RE::Actor* a, Drive& d, RE::bhkCharacterController* a_controller, RE::bhkWorld* a_world, float a_delta)
 		{
 			float dt = std::min(a_delta, 0.05f);
@@ -424,6 +474,7 @@ namespace Driver
 				d.moveSent = true;
 				d.lastMoveKick = d.elapsed;
 			}
+			Sprint(a, d, d.order.speed > 600.0f);  // faster than a jog: look like it
 			return nullptr;
 		}
 
@@ -603,7 +654,8 @@ namespace Driver
 					move.z = 0.0f;
 					if (move.Length() > 0.0f) move = move / move.Length();
 					face = speedNow > 40.0f ? Heading(move) : Heading(Polar(target, 0.0f, 100.0f, zh) - pos);
-					d.wantSprint = sprinting && speedNow > d.order.speed * 1.05f;
+					// sprint when the player does, or whenever she runs faster than a jog (catching up)
+					d.wantSprint = (sprinting && speedNow > d.order.speed * 1.05f) || speedNow > (d.sprinting ? 480.0f : 560.0f);
 					break;
 				}
 			default:  // run to
@@ -679,48 +731,7 @@ namespace Driver
 				d.moveSent = true;
 				if (!took && d.order.kind != Kind::kFormation) logger::info("{}: moveStart refused by the graph", a->GetDisplayFullName());
 			}
-			if (d.order.kind == Kind::kFormation && d.sprinting && !d.wantSprint) {
-				state->actorState1.sprinting = 0;
-				a->SetGraphVariableBool("IsSprinting", false);
-				Send(a, "SprintStop"sv);
-				d.sprinting = false;
-			}
-			bool wantSprint = d.order.sprint || (d.order.kind == Kind::kFormation && d.wantSprint);
-			if (!wantSprint && !d.sprinting) {
-				// a sprint the game started before this drive: the game's SprintStop is refused while
-				// driven, so it would never end (sprinting on the spot)
-				bool graphSprint = false;
-				a->GetGraphVariableBool("IsSprinting", graphSprint);
-				if (graphSprint || state->IsSprinting()) {
-					state->actorState1.sprinting = 0;
-					a->SetGraphVariableBool("IsSprinting", false);
-					Send(a, "SprintStop"sv);
-				}
-			}
-			if (wantSprint && !d.sprinting) {
-				state->actorState1.sprinting = 1;
-				bool flag = a->SetGraphVariableBool("IsSprinting", true);
-				bool took = Send(a, "SprintStart"sv);
-				bool readBack = false;
-				a->GetGraphVariableBool("IsSprinting", readBack);
-				d.sprinting = true;
-				if (!d.sprintLogged) {
-					logger::info("{}: sprint: IsSprinting variable {}, read back {}, SprintStart event {}", a->GetDisplayFullName(),
-						flag ? "set" : "not in this graph", readBack, took ? "taken" : "refused");
-					d.sprintLogged = true;
-				}
-			} else if (d.sprinting) {
-				// the game clears the sprint state on its own: keep it, and restart the sprint if the graph left it
-				state->actorState1.sprinting = 1;
-				bool still = false;
-				a->GetGraphVariableBool("IsSprinting", still);
-				if (!still && d.elapsed - d.lastSprintKick > 0.3f) {
-					a->SetGraphVariableBool("IsSprinting", true);
-					Send(a, "SprintStart"sv);
-					d.lastSprintKick = d.elapsed;
-					++d.sprintKicks;
-				}
-			}
+			Sprint(a, d, d.order.sprint || (d.order.kind == Kind::kFormation && d.wantSprint));
 			return nullptr;
 		}
 	}
