@@ -336,7 +336,8 @@ namespace Lab
 					return;
 				}
 				auto counts = who->GetInventoryCounts();
-				if (counts[item] <= 0) who->AddObjectToContainer(item, nullptr, 1, nullptr);
+				int want = words.size() >= 4 ? static_cast<int>(num(3, 1.0f)) : 1;  // equip <who> <id> [count]: arrows
+				if (counts[item] < want) who->AddObjectToContainer(item, nullptr, want - std::max(0, counts[item]), nullptr);
 				RE::ActorEquipManager::GetSingleton()->EquipObject(who, item);
 				Say(std::format("{} equips {}", who->GetDisplayFullName(), item->GetName()));
 			} else if (cmd == "unequip" && words.size() >= 3) {

@@ -21,6 +21,18 @@ Work in progress.
 - Followers that fall behind get a short speed boost. If they are still far away and out of
   sight, they are moved behind you.
 
+**Fighting like a player**
+- Followers read enemy attacks and react: a dodge (left, right or back, with the game's dodge
+  animations where the load order has them), a block or shield bash, or a step out of reach, and
+  they strike back as the attack ends. Spell casts and enemies standing idle are openings to hit.
+- They learn each kind of enemy by fighting it: how many attacks they see coming, how fast they
+  react, which way out works, and how dangerous it is (they dodge more against what hurts them,
+  and trade blows with what doesn't). Experience fades if they haven't met that kind for a while,
+  and is kept in the save. Works with any creature, vanilla or added by mods.
+- Against harmless enemies they mow them down: downed enemies first, then the quickest kill.
+- Outnumbered, they keep enemies in front of them and fall back to your side; with a wall at their
+  back they side-step to open ground; corpses in the way get shoved aside.
+
 **Combat awareness**
 - Followers notice what you notice: aim at, or watch, a hostile for a moment and your
   followers get ready to fight it.
