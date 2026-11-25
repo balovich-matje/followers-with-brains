@@ -247,10 +247,9 @@ namespace Lab
 		{
 			auto& extra = g_extraHealth[a->GetFormID()];
 			float target = std::max(0.0f, a_amount);
-			// what was added before, read from the actor itself (the lab's own count is lost when the brain
-			// is reloaded, and then extra health piled up again): the permanent health modifier
-			float added = a->GetActorValueModifier(RE::ACTOR_VALUE_MODIFIER::kPermanent, RE::ActorValue::kHealth);
-			float delta = target - added;
+			// only what the lab itself added (the actor's permanent modifier also holds the game's own
+			// bonuses: removing all of it took 1125 health off a follower)
+			float delta = target - extra;
 			extra = target;
 			auto avo = a->AsActorValueOwner();
 			avo->ModActorValue(RE::ActorValue::kHealth, delta);
@@ -335,6 +334,13 @@ namespace Lab
 					bool drawn = a->AsActorState()->IsWeaponDrawn();
 					Say(std::format("{}: {} {} (weapon {}, weapon state {})", a->GetDisplayFullName(), words[2], took ? "taken" : "refused",
 						drawn ? "drawn" : "sheathed", static_cast<int>(a->AsActorState()->GetWeaponState())));
+				}
+			} else if (cmd == "restorehealth" && words.size() >= 3) {
+				// restorehealth <who> <amount>: give back health taken by mistake, not counted as test health
+				if (auto a = Who(words[1])) {
+					a->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, num(2, 0.0f));
+					a->AsActorValueOwner()->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, 1e6f);
+					Say(std::format("{} health {:.0f}", a->GetDisplayFullName(), a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth)));
 				}
 			} else if (cmd == "potions" && words.size() >= 2) {
 				if (auto a = Who(words[1])) Say(std::format("{}: {}", a->GetDisplayFullName(), Potions::Describe(a)));

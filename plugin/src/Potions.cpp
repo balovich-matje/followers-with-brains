@@ -86,6 +86,7 @@ namespace Potions
 			bool  wasInCombat = false;
 			float buffFrom = -1.0f;  // fight started: buffs from then on
 			int   buffsLeft = 0;
+			float lastCombat = -100.0f;
 		};
 		std::unordered_map<RE::FormID, State> g_state;
 
@@ -101,10 +102,13 @@ namespace Potions
 	void Update(RE::Actor* a_follower, bool a_inCombat, bool a_fodder, float a_now)
 	{
 		auto& st = g_state[a_follower->GetFormID()];
-		if (a_inCombat && !st.wasInCombat) {
+		// a new fight: not the game flicking her in and out of combat as one starts (that refilled the
+		// allowance: four buffs at once)
+		if (a_inCombat && !st.wasInCombat && a_now - st.lastCombat > 20.0f) {
 			st.buffFrom = a_now + 1.0f;  // a moment to see what the fight is
 			st.buffsLeft = 2;
 		}
+		if (a_inCombat) st.lastCombat = a_now;
 		st.wasInCombat = a_inCombat;
 		if (!a_inCombat || a_now < st.nextCheck || a_now - st.lastDrink < 1.5f) return;
 		st.nextCheck = a_now + 0.5f;
