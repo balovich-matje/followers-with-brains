@@ -1106,6 +1106,7 @@ namespace Followers
 			float nextRoomCheck = 0.0f;  // keeping room to back off (wall behind her?)
 			float nextOpening = 0.0f;    // looking for an opening to strike
 			float nextGuardBreak = 0.0f; // a raised guard: a heavy attack into it
+			float nextKite = 0.0f;       // bow or staff in hand: backing off from blades
 			float blockSince = -1.0f;
 			float guardCheckAt = -1.0f;  // did that heavy attack stagger it?
 			RE::ActorHandle guardTarget;
@@ -1575,6 +1576,37 @@ namespace Followers
 							r.idleSince = -1.0f;
 							logger::info("{}: opening, {} {} ({})", Name(f), Dist(f, e) <= reach + 30.0f ? "strikes" : "steps in on", Name(e),
 								casting ? "it casts" : "it stands there");
+						}
+					}
+				}
+
+				// A bow or staff in hand: a player doesn't trade blows. Someone with a blade coming for her (or
+				// right on her) gets left behind: a backpedal to shooting distance between shots.
+				if (r.action == 0 && r.reactAt < 0.0f && !Driver::IsDriving(f) && IsRanged(f) && g_time >= r.nextKite &&
+					f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone) {
+					r.nextKite = g_time + 0.25f;
+					RE::Actor* close = nullptr;
+					float      closest = 260.0f;
+					for (auto& h : g_lastEnemies) {
+						auto e = Get(h);
+						if (!Alive(e) || IsRanged(e) || IsStaggered(e)) continue;
+						float d = Dist(f, e);
+						if ((CombatTarget(e) == f || d < 150.0f) && d < closest) {
+							closest = d;
+							close = e;
+						}
+					}
+					if (close) {
+						Driver::Order order;
+						order.kind = Driver::Kind::kStepBack;
+						order.target = close->GetHandle();
+						order.speed = Tuning::Get().stepSpeed;
+						order.weave = Tuning::Get().stepDiagonal;
+						order.stopDistance = 450.0f;
+						order.duration = 1.5f;
+						if (Driver::Start(f, order)) {
+							r.nextKite = g_time + 1.5f;
+							logger::info("{}: backs off from {} ({:.0f} away) to shoot", Name(f), Name(close), closest);
 						}
 					}
 				}
