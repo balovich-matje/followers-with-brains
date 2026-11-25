@@ -965,6 +965,8 @@ namespace Followers
 		{
 			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash, 4 dodge animation
 			float nextRoomCheck = 0.0f;  // keeping room to back off (wall behind her?)
+			float nextOpening = 0.0f;    // looking for an opening to strike
+			float idleSince = -1.0f;     // her target standing idle since
 			RE::ActorHandle seen;      // an attack she has seen coming, to react to at reactAt
 			float reactAt = -1.0f;
 			float until = 0.0f;
@@ -1263,7 +1265,12 @@ namespace Followers
 						auto e = Get(r.against);
 						if (e && !IsStaggered(e)) ++g_bashFails[e->GetFormID()];
 					}
+					bool counter = r.action == 2 || r.action == 3;  // the swing was blocked or bashed: hit back now
 					EndReflex(f, r);
+					if (counter) {
+						r.punishAt = g_time;
+						r.punishApproachStarted = false;
+					}
 				}
 				if (r.punishAt >= 0.0f && g_time >= r.punishAt) {
 					// close back in to our own reach, then strike
@@ -1310,7 +1317,8 @@ namespace Followers
 
 				// Keep room to back off, as a player does: with a wall or a drop at her back and the enemy
 				// between attacks, she circles round it until there's open ground behind her.
-				if (r.action == 0 && r.reactAt < 0.0f && r.punishAt < 0.0f && !Driver::IsDriving(f) && g_time >= r.nextRoomCheck) {
+				if (Tuning::Get().roomKeeping > 0.0f && r.action == 0 && r.reactAt < 0.0f && r.punishAt < 0.0f && !Driver::IsDriving(f) &&
+					g_time >= r.nextRoomCheck) {
 					r.nextRoomCheck = g_time + 0.5f;
 					auto e = CombatTarget(f);
 					float d = Alive(e) ? Dist(f, e) : 9999.0f;
@@ -1348,6 +1356,32 @@ namespace Followers
 									break;
 								}
 							}
+						}
+					}
+				}
+
+				// Openings a player wouldn't waste: the target casting (hands busy) or just standing there for a
+				// moment between attacks (draugr do). Strike while it lasts.
+				if (r.action == 0 && r.reactAt < 0.0f && r.punishAt < 0.0f && !Driver::IsDriving(f) && !IsRanged(f) &&
+					g_time >= r.nextOpening) {
+					r.nextOpening = g_time + 0.2f;
+					auto e = CombatTarget(f);
+					auto w = f->GetEquippedObject(false) ? f->GetEquippedObject(false)->As<RE::TESObjectWEAP>() : nullptr;
+					float reach = w ? std::max(120.0f, w->GetReach() * 140.0f) : 150.0f;
+					if (Alive(e) && Dist(f, e) <= reach + 30.0f && f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone &&
+						!f->IsBlocking()) {
+						bool casting = IsCasting(e);
+						bool idle = e->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone && !e->IsBlocking() && !IsStaggered(e);
+						if (idle) {
+							if (r.idleSince < 0.0f) r.idleSince = g_time;
+						} else {
+							r.idleSince = -1.0f;
+						}
+						if (casting || (idle && g_time - r.idleSince > 0.4f)) {
+							StrikeAt(f, e);
+							r.nextOpening = g_time + 0.8f;
+							r.idleSince = -1.0f;
+							logger::info("{}: opening, strikes {} ({})", Name(f), Name(e), casting ? "it casts" : "it stands there");
 						}
 					}
 				}

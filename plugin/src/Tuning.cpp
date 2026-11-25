@@ -25,6 +25,7 @@ namespace Tuning
 			{ "FinishMargin"sv, &Values::finishMargin },
 			{ "RollChance"sv, &Values::rollChance },
 			{ "Practice"sv, &Values::practice },
+			{ "RoomKeeping"sv, &Values::roomKeeping },
 			{ "LearnScale"sv, &Values::learnScale },
 		};
 
