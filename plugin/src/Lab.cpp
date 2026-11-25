@@ -82,8 +82,23 @@ namespace Lab
 			auto  target = a->GetActorRuntimeData().currentCombatTarget.get();
 			bool  stagger = false;
 			a->GetGraphVariableBool("IsStaggering", stagger);
-			auto        right = a->GetEquippedObject(false);
-			std::string weapon = right ? Clean(right->GetName()) : "";
+			// both hands, with the kind of item (names are localised and easy to misread)
+			auto hand = [](RE::TESForm* a_item) -> std::string {
+				if (!a_item) return "-";
+				std::string kind = "item";
+				if (auto w = a_item->As<RE::TESObjectWEAP>()) {
+					kind = w->IsBow() ? "bow" : w->IsCrossbow() ? "crossbow" : w->IsStaff() ? "staff" :
+					       w->IsTwoHandedSword() ? "2h sword" : w->IsTwoHandedAxe() ? "2h axe/hammer" :
+					       w->IsOneHandedSword() ? "1h sword" : w->IsOneHandedAxe() ? "1h axe" : w->IsOneHandedMace() ? "1h mace" :
+					       w->IsOneHandedDagger() ? "dagger" : w->IsHandToHandMelee() ? "fists" : "weapon";
+				} else if (a_item->IsArmor()) {
+					kind = "shield";
+				} else if (a_item->Is(RE::FormType::Spell)) {
+					kind = "spell";
+				}
+				return std::format("{} ({})", Clean(a_item->GetName()), kind);
+			};
+			std::string weapon = hand(a->GetEquippedObject(false)) + " | " + hand(a->GetEquippedObject(true));
 			RE::NiPoint3 vel;
 			a->GetLinearVelocity(vel);
 			vel.z = 0.0f;
