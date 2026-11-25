@@ -323,6 +323,16 @@ namespace Lab
 					AddHealth(a, num(2, 0.0f));
 					Say(std::format("{} health {:.0f}", a->GetDisplayFullName(), a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth)));
 				}
+			} else if (cmd == "base" && words.size() >= 2) {
+				// base <ref id>: what a placed actor is made from (to spawn it again later)
+				RE::Actor* a = nullptr;
+				try {
+					a = RE::TESForm::LookupByID<RE::Actor>(static_cast<RE::FormID>(std::stoul(words[1], nullptr, 16)));
+				} catch (...) {}
+				auto base = a ? a->GetActorBase() : nullptr;
+				auto lvl = a && a->extraList.GetByType<RE::ExtraLeveledCreature>() ? a->extraList.GetByType<RE::ExtraLeveledCreature>()->originalBase : nullptr;
+				Say(base ? std::format("{} base {:08X}{}", a->GetDisplayFullName(), base->GetFormID(),
+				               lvl ? std::format(" (leveled from {:08X})", lvl->GetFormID()) : std::string{}) : "base: no such actor");
 			} else if (cmd == "stop" && words.size() >= 2) {
 				if (auto a = Who(words[1])) {
 					Papyrus::StopCombat(a);
