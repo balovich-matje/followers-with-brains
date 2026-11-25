@@ -411,6 +411,15 @@ namespace Lab
 		// a hot reload: carry on where the old brain stopped reading (commands sent meanwhile still run)
 		char offset[32]{};
 		if (GetEnvironmentVariable("FWB_OUT_OFFSET", offset, sizeof(offset)) > 0) g_outOffset = std::strtoull(offset, nullptr, 10);
+		char extra[4096]{};
+		if (GetEnvironmentVariable("FWB_EXTRA_HEALTH", extra, sizeof(extra)) > 0) {
+			std::istringstream in{ std::string{ extra } };
+			for (std::string item; std::getline(in, item, ';');) {
+				auto eq = item.find('=');
+				if (eq == std::string::npos) continue;
+				g_extraHealth[static_cast<RE::FormID>(std::stoul(item.substr(0, eq), nullptr, 16))] = std::stof(item.substr(eq + 1));
+			}
+		}
 		auto events = RE::ScriptEventSourceHolder::GetSingleton();
 		events->AddEventSink<RE::TESHitEvent>(Events::Get());
 		events->AddEventSink<RE::TESDeathEvent>(Events::Get());
@@ -428,6 +437,10 @@ namespace Lab
 		events->RemoveEventSink<RE::TESDeathEvent>(Events::Get());
 		g_track.close();
 		SetEnvironmentVariableA("FWB_OUT_OFFSET", std::to_string(g_outOffset).c_str());
+		// test health added by commands, for the next brain
+		std::string extra;
+		for (auto& [id, amount] : g_extraHealth) extra += std::format("{:08X}={:.0f};", id, amount);
+		SetEnvironmentVariableA("FWB_EXTRA_HEALTH", extra.c_str());
 		g_on = false;
 	}
 
