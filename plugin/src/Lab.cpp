@@ -324,6 +324,40 @@ namespace Lab
 					Papyrus::StopCombat(a);
 					Say(std::format("{} stops fighting", a->GetDisplayFullName()));
 				}
+			} else if (cmd == "equip" && words.size() >= 3) {
+				// equip <who> <item id>: given if she doesn't have it, then equipped (two-handers clear both hands)
+				auto who = Who(words[1]);
+				RE::TESBoundObject* item = nullptr;
+				try {
+					item = RE::TESForm::LookupByID<RE::TESBoundObject>(static_cast<RE::FormID>(std::stoul(words[2], nullptr, 16)));
+				} catch (...) {}
+				if (!who || !item) {
+					Say("equip: who or what?");
+					return;
+				}
+				auto counts = who->GetInventoryCounts();
+				if (counts[item] <= 0) who->AddObjectToContainer(item, nullptr, 1, nullptr);
+				RE::ActorEquipManager::GetSingleton()->EquipObject(who, item);
+				Say(std::format("{} equips {}", who->GetDisplayFullName(), item->GetName()));
+			} else if (cmd == "unequip" && words.size() >= 3) {
+				// unequip <who> <left|right>
+				auto who = Who(words[1]);
+				auto obj = who ? who->GetEquippedObject(words[2] == "left") : nullptr;
+				if (auto bound = obj ? obj->As<RE::TESBoundObject>() : nullptr) {
+					RE::ActorEquipManager::GetSingleton()->UnequipObject(who, bound);
+					Say(std::format("{} unequips {}", who->GetDisplayFullName(), bound->GetName()));
+				}
+			} else if (cmd == "learn" && words.size() >= 3) {
+				// learn <who> <spell id>
+				auto who = Who(words[1]);
+				RE::SpellItem* spell = nullptr;
+				try {
+					spell = RE::TESForm::LookupByID<RE::SpellItem>(static_cast<RE::FormID>(std::stoul(words[2], nullptr, 16)));
+				} catch (...) {}
+				if (who && spell) {
+					who->AddSpell(spell);
+					Say(std::format("{} learns {}", who->GetDisplayFullName(), spell->GetName()));
+				}
 			} else if (cmd == "clearbodies") {
 				// clearbodies [radius]: remove the dead (not followers) around the player
 				int  removed = 0;
