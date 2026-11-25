@@ -255,6 +255,18 @@ namespace Followers
 
 		RE::Actor* CombatTarget(RE::Actor* a) { return Get(a->GetActorRuntimeData().currentCombatTarget); }
 
+		// Turn to face a_target and swing (a strike the mod starts: punish, finish, opening).
+		// A dodge animation or the AI may have left her facing elsewhere; swinging at the air with
+		// her back to the enemy is the last thing a player would do.
+		void StrikeAt(RE::Actor* a, RE::Actor* a_target)
+		{
+			if (a_target) {
+				RE::NiPoint3 to = a_target->GetPosition() - a->GetPosition();
+				if (to.x * to.x + to.y * to.y > 1.0f) a->SetRotationZ(std::atan2(to.x, to.y));
+			}
+			a->NotifyAnimationGraph("attackStart"sv);
+		}
+
 		bool IsEnemyOf(RE::Actor* a_enemy, RE::PlayerCharacter* a_player)
 		{
 			return Alive(a_enemy) && a_enemy != a_player && !a_enemy->IsPlayerTeammate() && a_enemy->IsHostileToActor(a_player);
@@ -1062,7 +1074,7 @@ namespace Followers
 				float mine = hits * Loadout::HitDamage(f, e, f->GetEquippedEntryData(false));
 				float left = e->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
 				if (hits > 0 && Dist(f, e) <= reach + 20.0f && mine >= left * Tuning::Get().finishMargin) {
-					if (free) f->NotifyAnimationGraph("attackStart"sv);
+					if (free) StrikeAt(f, e);
 					r.action = 0;
 					r.cooldownUntil = g_time + 0.5f;
 					Debug(std::format("{}: finishes {} before its {} lands ({} hits, {:.0f} dmg vs {:.0f} hp)", Name(f), Name(e),
@@ -1238,7 +1250,7 @@ namespace Followers
 						r.punishAt = -1.0f;
 					} else if (Dist(f, e) <= reach + 40.0f) {
 						Driver::Stop(f);
-						f->NotifyAnimationGraph("attackStart"sv);
+						StrikeAt(f, e);
 						++g_stats.punishes;
 						r.punishAt = -1.0f;
 						Debug(std::format("{}: punish {}", Name(f), Name(e)));
@@ -1330,7 +1342,7 @@ namespace Followers
 					// opening: the enemy was just staggered next to us -> hit it now
 					if (staggered && !wasStaggered && d < 300.0f && r.action == 0 && !IsRanged(f) &&
 						f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone) {
-						f->NotifyAnimationGraph("attackStart"sv);
+						StrikeAt(f, e);
 						++g_stats.punishes;
 						Debug(std::format("{}: punish staggered {}", Name(f), Name(e)));
 						continue;
@@ -1805,7 +1817,7 @@ namespace Followers
 					order.duration = 2.0f;
 					if (Driver::Start(f, order)) Debug(std::format("{} goes to finish {}", Name(f), Name(target)));
 				} else if (f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone && g_time - s.lastFinish > 1.0f) {
-					f->NotifyAnimationGraph("attackStart"sv);
+					StrikeAt(f, target);
 					s.lastFinish = g_time;
 				}
 				return;
