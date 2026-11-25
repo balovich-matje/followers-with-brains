@@ -581,8 +581,13 @@ namespace Followers
 			} else if (dz < -80.0f && dz > -700.0f && d < 800.0f) {
 				// down toward the player
 				landing = fp + dir * std::min(260.0f, d * 0.6f);
-				landing.z = pp.z;
-				if (!Driver::GroundAt(f, landing, 250.0f) || landing.z > fp.z - 40.0f) {
+				// the first ground straight down from her own height (searching from the player's level skipped
+				// the stairs she stood on and dropped her through them), clear air out to it, and it must
+				// be the player's level, not another turn of the stairs
+				landing.z = fp.z - 320.0f;
+				auto above = fp + dir * std::min(260.0f, d * 0.6f);
+				if (!Driver::ClearLine(f, fp, above) || !Driver::GroundAt(f, landing, 380.0f) || landing.z > fp.z - 40.0f ||
+				    std::fabs(landing.z - pp.z) > 80.0f) {
 					++s.hopFails;
 					return false;
 				}
