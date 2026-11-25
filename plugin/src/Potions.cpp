@@ -11,28 +11,27 @@ namespace Potions
 			kBuff   // lasting good effects (fortify, resist...)
 		};
 
-		bool Tagged(const RE::EffectSetting* a_base, std::string_view a_part)
+		// The game's own tag for healing potions (its AI picks potions by it). Looked up once by its editor
+		// ID; checking an effect's keywords against it reads no names (reading the names of arbitrary
+		// keywords crashed the game with RFAB's potions).
+		RE::BGSKeyword* RestoreTag()
 		{
-			if (!a_base->keywords) return false;
-			for (std::uint32_t k = 0; k < a_base->numKeywords; ++k) {
-				auto kw = a_base->keywords[k];
-				auto id = kw ? kw->GetFormEditorID() : nullptr;  // some keywords carry no editor ID: null, not ""
-				if (id && std::string_view{ id }.find(a_part) != std::string_view::npos) return true;
-			}
-			return false;
+			static RE::BGSKeyword* tag = RE::TESForm::LookupByEditorID<RE::BGSKeyword>("MagicAlchRestoreHealth");
+			return tag;
 		}
 
-		// Restores health. Read from the effect's tags, the ones the game's own AI picks potions by
-		// (MagicAlchRestoreHealth): overhauls build restore and fortify potions alike (RFAB: both raise
-		// health for a time), the tag tells them apart. Untagged: an instant or short health restore.
+		// Restores health: tagged so, or (untagged) a short restore of health. Overhauls build restore and
+		// fortify potions alike (RFAB: both raise health for a while); the tag tells them apart.
 		bool HealsHealth(const RE::Effect* a_effect)
 		{
 			auto base = a_effect ? a_effect->baseEffect : nullptr;
 			if (!base || base->IsDetrimental()) return false;
-			if (Tagged(base, "RestoreHealth")) return true;
-			if (Tagged(base, "Fortify")) return false;
-			return base->data.primaryAV == RE::ActorValue::kHealth && base->GetArchetype() == RE::EffectSetting::Archetype::kValueModifier &&
-			       a_effect->effectItem.duration <= 30;
+			if (auto tag = RestoreTag(); tag && base->HasKeyword(tag)) return true;
+			// untagged: raises health for a short while (restores are short, fortifies last minutes)
+			using A = RE::EffectSetting::Archetype;
+			auto type = base->GetArchetype();
+			return base->data.primaryAV == RE::ActorValue::kHealth && (type == A::kValueModifier || type == A::kPeakValueModifier) &&
+			       a_effect->effectItem.duration <= 60;
 		}
 
 		Kind KindOf(RE::AlchemyItem* a_potion)
@@ -177,17 +176,12 @@ namespace Potions
 			{
 				for (auto e : potion->effects) {
 					if (e && e->baseEffect)
-						for (std::uint32_t k = 0; e->baseEffect->keywords && k < e->baseEffect->numKeywords; ++k) {
-							auto kw = e->baseEffect->keywords[k];
-							auto id = kw ? kw->GetFormEditorID() : nullptr;
-							out += std::format(" <{}>", id && *id ? id : "?");
-						}
 						out += std::format(" [av{} arch{} {}{} x{}s]", static_cast<int>(e->baseEffect->data.primaryAV),
 							static_cast<int>(e->baseEffect->GetArchetype()), e->baseEffect->IsDetrimental() ? "bad " : "",
 							e->effectItem.magnitude, e->effectItem.duration);
 				}
 			}
 		}
-		return out.empty() ? "no potions" : out;
+		return std::format("{} (restore tag {})", out.empty() ? "no potions" : out, RestoreTag() ? "found" : "not found");
 	}
 }
