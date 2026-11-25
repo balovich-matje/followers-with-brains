@@ -94,6 +94,7 @@ namespace Followers
 			float bestTargetTime = 0.0f;
 			float lastSprintKick = -100.0f;
 			bool  mirroringSprint = false;
+			RE::ActorHandle addsFirstFor;          // a summoner too tough to rush: its summons first
 			RE::NiPoint3 sprintCheckPos;           // sprinting on the spot (the AI sprinting into something)
 			float sprintCheckTime = -1.0f;
 			// measured damage while holding each kind of weapon (0 melee, 1 ranged)
@@ -2251,7 +2252,19 @@ namespace Followers
 				// a summon already on her while its master is well away: cut it down first, as a player does
 				// (otherwise she and the game's AI tug her target back and forth every second)
 				bool summonOnHer = summoner && Dist(f, target) < 300.0f && Dist(f, summoner.get()) > Dist(f, target) + 300.0f;
-				if (!ignored && !summonOnHer && summoner && Alive(summoner.get()) && IsEnemyOf(summoner.get(), player) &&
+				// worth going for only if it drops quickly (a necromancer in robes). A tough boss: clear its
+				// adds first, the small victories that stop the pressure, as a player would.
+				bool quickKill = false;
+				if (summoner && Alive(summoner.get())) {
+					float boss = KillTime(f, summoner.get());
+					float add = KillTime(f, target);
+					quickKill = boss <= std::max(4.0f, 2.0f * add);
+					if (!quickKill && Get(s.addsFirstFor) != summoner.get()) {
+						s.addsFirstFor = summoner->GetHandle();
+						Debug(std::format("{}: {} is tough (~{:.0f}s to kill), clears its adds first", Name(f), Name(summoner.get()), boss));
+					}
+				}
+				if (!ignored && !summonOnHer && quickKill && summoner && Alive(summoner.get()) && IsEnemyOf(summoner.get(), player) &&
 					Dist(f, summoner.get()) < kSummonerReach) {
 					s.redirectedFrom = target->GetHandle();
 					StartCombat(f, s, summoner.get(), "summoner first");
