@@ -222,6 +222,13 @@ namespace Driver
 
 		float Heading(const RE::NiPoint3& a_dir) { return std::atan2(a_dir.x, a_dir.y); }
 
+		// Someone who steps aside (or gets pushed): a living actor. A corpse is just in the way.
+		bool Living(RE::TESObjectREFR* a_ref)
+		{
+			auto actor = a_ref ? a_ref->As<RE::Actor>() : nullptr;
+			return actor && !actor->IsDead();
+		}
+
 		constexpr float kDeg = 0.01745329f;
 
 		// a point at angle (degrees, 0 = target's forward, + = right) and range from the target
@@ -448,7 +455,7 @@ namespace Driver
 			// walls in the way: give up (the route came from someone walking it, so this is rare)
 			RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f };
 			auto         ahead = Cast(a, a_world, pos + chest, pos + chest + move * (step + 30.0f));
-			if (ahead.hit && ahead.ref != a && !(ahead.ref && ahead.ref->Is(RE::FormType::ActorCharacter))) return "blocked";
+			if (ahead.hit && ahead.ref != a && !Living(ahead.ref)) return "blocked";
 			// stay on the ground, following the route's height (stairs, slopes)
 			float top = std::max(pos.z, goal.z) + 70.0f;
 			auto  ground = Cast(a, a_world, RE::NiPoint3{ next.x, next.y, top }, RE::NiPoint3{ next.x, next.y, std::min(pos.z, goal.z) - 120.0f });
@@ -494,7 +501,7 @@ namespace Driver
 		// Room to step that way: nothing at chest or knee height, and ground under the end.
 		bool ClearStep(RE::Actor* a, RE::bhkWorld* a_world, const RE::NiPoint3& a_pos, const RE::NiPoint3& a_dir, float a_len)
 		{
-			auto solid = [&](const Hit& h) { return h.hit && h.ref != a && !(h.ref && h.ref->Is(RE::FormType::ActorCharacter)); };
+			auto solid = [&](const Hit& h) { return h.hit && h.ref != a && !Living(h.ref); };
 			RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f }, knee{ 0.0f, 0.0f, 30.0f };
 			if (solid(Cast(a, a_world, a_pos + chest, a_pos + chest + a_dir * a_len))) return false;
 			if (solid(Cast(a, a_world, a_pos + knee, a_pos + knee + a_dir * a_len))) return false;
@@ -706,7 +713,7 @@ namespace Driver
 			if (ahead.hit && ahead.ref != a) {
 				if (ahead.ref == target && d.order.kind != Kind::kFormation) return "arrived";
 				// people (the player, other followers) step aside or get pushed; only walls and rocks stop a drive
-				if (!ahead.ref || !ahead.ref->Is(RE::FormType::ActorCharacter)) {
+				if (!Living(ahead.ref)) {
 					// stepping out of a swing with a wall behind: the other diagonal, or sideways, as a player
 					// would; give up only when boxed in
 					bool found = false;
@@ -905,7 +912,7 @@ namespace Driver
 		if (!world) return true;
 		RE::NiPoint3 chest{ 0.0f, 0.0f, 60.0f };
 		auto hit = Cast(a_actor, world, a_from + chest, a_to + chest);
-		return !hit.hit || hit.ref == a_actor || (hit.ref && hit.ref->Is(RE::FormType::ActorCharacter));
+		return !hit.hit || hit.ref == a_actor || Living(hit.ref);
 	}
 
 	bool GroundAt(RE::Actor* a_actor, RE::NiPoint3& a_point, float a_range)
