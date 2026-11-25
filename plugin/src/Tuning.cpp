@@ -23,9 +23,7 @@ namespace Tuning
 			{ "DodgeCooldown"sv, &Values::dodgeCooldown },
 			{ "CloseSpeed"sv, &Values::closeSpeed },
 			{ "FinishMargin"sv, &Values::finishMargin },
-			{ "RollChance"sv, &Values::rollChance },
 			{ "Practice"sv, &Values::practice },
-			{ "RoomKeeping"sv, &Values::roomKeeping },
 			{ "LearnScale"sv, &Values::learnScale },
 		};
 

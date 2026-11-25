@@ -18,12 +18,10 @@ namespace Tuning
 		float dodgeShare = 0.2f;      // dodge hits above this share of current health (power attacks always)
 		float dodgeChance = 75.0f;    // percent
 		float dodgeCooldown = 2.5f;   // seconds between dodges
-		float rollChance = 50.0f;     // percent of dodges done with a dodge animation (big hits: always)
-		float finishMargin = 1.1f;
-		float learnScale = 40.0f;     // attacks faced to learn ~63% of an enemy kind (higher = slower learning)
-		float practice = 0.0f;
-		float roomKeeping = 0.0f;     // 1 = step round the enemy when a wall is at her back (off: it looked like sliding)        // test switch: 1 = followers read every attack, instantly (no learning curve)    // keep attacking instead of dodging when her hits before the enemy's
+		float finishMargin = 1.1f;    // keep attacking instead of dodging when her hits before the enemy's
 		                              // swing lands come to this much of its health (1.1 = 10% to spare)
+		float learnScale = 40.0f;     // attacks faced to learn ~63% of an enemy kind (higher = slower learning)
+		float practice = 0.0f;        // test switch: 1 = followers read every attack, instantly (no learning curve)
 		// closing back in to strike
 		float closeSpeed = 380.0f;    // units/s
 	};

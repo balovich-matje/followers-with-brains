@@ -1317,7 +1317,7 @@ namespace Followers
 
 				// Keep room to back off, as a player does: with a wall or a drop at her back and the enemy
 				// between attacks, she circles round it until there's open ground behind her.
-				if (Tuning::Get().roomKeeping > 0.0f && r.action == 0 && r.reactAt < 0.0f && r.punishAt < 0.0f && !Driver::IsDriving(f) &&
+				if (r.action == 0 && r.reactAt < 0.0f && r.punishAt < 0.0f && !Driver::IsDriving(f) &&
 					g_time >= r.nextRoomCheck) {
 					r.nextRoomCheck = g_time + 0.5f;
 					auto e = CombatTarget(f);
@@ -1343,15 +1343,16 @@ namespace Followers
 									float wayLen = way.Length();
 									if (wayLen < 40.0f || Driver::Room(f, f->GetPosition(), way / wayLen, wayLen) + 80.0f < wayLen) continue;
 									if (Driver::Room(f, spot, dir, 240.0f) < 240.0f) continue;
-									Driver::Order order;
-									order.kind = Driver::Kind::kStrafe;
-									order.target = e->GetHandle();
-									order.landing = spot;
-									order.speed = 260.0f;
-									order.duration = 0.9f;
-									if (Driver::Start(f, order)) {
-										r.nextRoomCheck = g_time + 6.0f;
-										Debug(std::format("{}: wall behind ({:.0f} room), circles {} round {}", Name(f), back, deg > 0 ? "left" : "right", Name(e)));
+									// a real side step (the dodge animation carries her, feet and all) toward that side
+									RE::NiPoint3 toE = ep - f->GetPosition();
+									toE.z = 0.0f;
+									bool        right = (way.x * toE.y - way.y * toE.x) > 0.0f;  // spot on her right of the enemy line
+									const char* side = Driver::Dodge(f, e, right ? "right" : "left");
+									if (side && side[0] != 'b') {
+										r.nextRoomCheck = g_time + 4.0f;
+										r.action = 4;
+										r.until = g_time + 0.7f;
+										Debug(std::format("{}: wall behind ({:.0f} room), side-steps {} round {}", Name(f), back, side, Name(e)));
 									}
 									break;
 								}

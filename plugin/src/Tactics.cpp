@@ -34,11 +34,10 @@ namespace Tactics
 				m.bashPowerAttackMult = std::max(m.bashPowerAttackMult, 2.0f);  // bash power attacks (needs a block)
 				m.bashMult = std::max(m.bashMult, 1.0f);
 				m.bashRecoilMult = std::max(m.bashRecoilMult, 1.0f);
-				c.fallbackMult = std::max(c.fallbackMult, 0.6f);            // step back after attacking
-				c.circleMult = std::max(c.circleMult, 0.6f);                // circle instead of standing still
-				s->flags.set(RE::TESCombatStyle::FLAG::kDuelingStyle);
+				c.circleMult = std::max(c.circleMult, 0.6f);                // circle instead of standing still (the
+				                                                            // game's own footwork, no sliding)
 			}
-			if (cfg.zigzag) {
+			if (cfg.zigzag && cfg.combatMovement) {
 				l.strafeMult = std::max(l.strafeMult, 1.0f);                // strafe at range: no straight runs at archers
 				s->flags.set(RE::TESCombatStyle::FLAG::kFlankingStyle);
 				c.flankDistanceMult = std::max(c.flankDistanceMult, 1.0f);
@@ -51,7 +50,8 @@ namespace Tactics
 		auto npc = a_follower ? a_follower->GetActorBase() : nullptr;
 		if (!npc) return;
 		auto& cfg = Settings::Get();
-		if (!cfg.combatMovement || (!cfg.reflexes && !cfg.zigzag)) {
+		// reflexes tune melee (circling, punishing, bashing); charging shooters needs the movement switch
+		if (!cfg.reflexes && !(cfg.combatMovement && cfg.zigzag)) {
 			Restore(a_follower);
 			return;
 		}
