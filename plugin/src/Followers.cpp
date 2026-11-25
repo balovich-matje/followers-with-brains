@@ -268,6 +268,11 @@ namespace Followers
 			a->NotifyAnimationGraph("attackStart"sv);
 		}
 
+		bool Reachable(RE::Actor* f, RE::Actor* e)
+		{
+			return std::fabs(e->GetPosition().z - f->GetPosition().z) < 120.0f && Driver::ClearLine(f, f->GetPosition(), e->GetPosition());
+		}
+
 		bool IsEnemyOf(RE::Actor* a_enemy, RE::PlayerCharacter* a_player)
 		{
 			return Alive(a_enemy) && a_enemy != a_player && !a_enemy->IsPlayerTeammate() && a_enemy->IsHostileToActor(a_player);
@@ -1382,8 +1387,9 @@ namespace Followers
 					auto e = CombatTarget(f);
 					auto w = f->GetEquippedObject(false) ? f->GetEquippedObject(false)->As<RE::TESObjectWEAP>() : nullptr;
 					float reach = w ? std::max(120.0f, w->GetReach() * 140.0f) : 150.0f;
-					if (Alive(e) && Dist(f, e) <= reach + 30.0f && f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone &&
-						!f->IsBlocking()) {
+					// (a step or two away counts too: she steps in and strikes, rather than hovering out of reach)
+					if (Alive(e) && Dist(f, e) <= reach + 180.0f && f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone &&
+						Reachable(f, e)) {
 						bool casting = IsCasting(e);
 						bool idle = e->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone && !e->IsBlocking() && !IsStaggered(e);
 						if (idle) {
@@ -1392,10 +1398,18 @@ namespace Followers
 							r.idleSince = -1.0f;
 						}
 						if (casting || (idle && g_time - r.idleSince > 0.4f)) {
-							StrikeAt(f, e);
+							if (f->IsBlocking()) f->NotifyAnimationGraph("blockStop"sv);
+							if (Dist(f, e) <= reach + 30.0f) {
+								StrikeAt(f, e);
+							} else {
+								r.punishAt = g_time;  // close in, then strike (the punish approach)
+								r.against = e->GetHandle();
+								r.punishApproachStarted = false;
+							}
 							r.nextOpening = g_time + 0.8f;
 							r.idleSince = -1.0f;
-							logger::info("{}: opening, strikes {} ({})", Name(f), Name(e), casting ? "it casts" : "it stands there");
+							logger::info("{}: opening, {} {} ({})", Name(f), Dist(f, e) <= reach + 30.0f ? "strikes" : "steps in on", Name(e),
+								casting ? "it casts" : "it stands there");
 						}
 					}
 				}
@@ -1597,11 +1611,6 @@ namespace Followers
 			float swing = 0.7f / std::max(0.5f, w ? w->GetSpeed() : 1.0f);
 			float walk = std::max(0.0f, Dist(f, e) - MeleeReach(f)) / 400.0f;
 			return hits * swing + walk;
-		}
-
-		bool Reachable(RE::Actor* f, RE::Actor* e)
-		{
-			return std::fabs(e->GetPosition().z - f->GetPosition().z) < 120.0f && Driver::ClearLine(f, f->GetPosition(), e->GetPosition());
 		}
 
 		// Against enemies she knows to be harmless, a player stops fencing and mows them down: finish
