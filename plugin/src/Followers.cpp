@@ -57,6 +57,7 @@ namespace Followers
 			RE::NiPoint3 followSample;
 			float followSampleTime = -100.0f;
 			float nextTrail = 0.0f;
+			float hazardUntil = 0.0f;      // hurt by a trap: the game's own movement until then
 			float footstepsAt = -100.0f;   // last time she set off in the player's footsteps
 			int   footstepFails = 0;       // footsteps runs blocked right away (then the game's pathing)
 			float looseness = 1.0f;
@@ -128,7 +129,8 @@ namespace Followers
 			kPlayerCast,
 			kFollowerSwing,
 			kHit,
-			kDeath
+			kDeath,
+			kHazard  // b = an actor hurt by something that isn't an actor (a trap, fire, a fall)
 		};
 
 		struct QueuedEvent
@@ -500,7 +502,10 @@ namespace Followers
 			order.kind = Driver::Kind::kPath;
 			order.target = a_player->GetHandle();
 			order.path = std::move(route);
-			order.speed = !a_goal && a_player->AsActorState()->IsSprinting() ? 715.0f : Tuning::Get().chargeSpeed;
+			// to the player: faster than they move while she is well behind, or she never catches up
+			order.speed = a_goal ? Tuning::Get().chargeSpeed :
+			              Dist(f, a_player) > 450.0f ? 890.0f :
+			              a_player->AsActorState()->IsSprinting() ? 715.0f : Tuning::Get().chargeSpeed;
 			order.duration = 20.0f;
 			if (!Driver::Start(f, order)) return false;
 			if (a_why == "footsteps") {
@@ -875,6 +880,15 @@ namespace Followers
 					auto& s = g_state[a->GetFormID()];
 					if (s.missedSwings == 0) s.firstMissTime = g_time;
 					++s.missedSwings;
+				}
+				break;
+
+			case EventType::kHazard:
+				if (b && IsFollower(b, player)) {
+					auto& s = g_state[b->GetFormID()];
+					if (g_time >= s.hazardUntil) Debug(std::format("{} hurt by a trap or hazard: the game moves her for a moment", Name(b)));
+					s.hazardUntil = g_time + 3.0f;
+					if (Driver::IsDriving(b)) Driver::Stop(b);
 				}
 				break;
 
@@ -1313,7 +1327,8 @@ namespace Followers
 			bool  waiting = IsWaiting(f);
 			auto  state = f->AsActorState();
 			bool  busy = waiting || InScene(f) || f->IsOnMount() || player->IsOnMount() ||
-			            state->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal;
+			            state->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal || state->IsBleedingOut() || g_time < s.hazardUntil;
+			if ((state->IsBleedingOut() || g_time < s.hazardUntil) && Driver::IsDriving(f)) Driver::Stop(f);
 			bool  sameSpace = f->GetWorldspace() == player->GetWorldspace() &&
 			                 (player->GetWorldspace() || f->GetParentCell() == player->GetParentCell());
 			// tagging along after an unreachable enemy ends with the fight, a retreat or a new target
@@ -1888,6 +1903,9 @@ namespace Followers
 			{
 				if (a_event && a_event->cause && a_event->target) {
 					Queue(EventType::kHit, HandleOf(a_event->cause.get()), HandleOf(a_event->target.get()));
+				}
+				if (a_event && a_event->target && (!a_event->cause || !a_event->cause->As<RE::Actor>())) {
+					Queue(EventType::kHazard, {}, HandleOf(a_event->target.get()));
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
