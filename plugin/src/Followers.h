@@ -4,6 +4,7 @@
 namespace Followers
 {
 	void Install();      // hooks and event sinks (call once on kDataLoaded)
+	void Shutdown();     // undoes everything Install and the followers' updates did (before a hot reload)
 	void Reset();        // clears per-follower state (new game / load)
 	void Tick(float a_delta);
 

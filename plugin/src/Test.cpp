@@ -1,4 +1,5 @@
 #include "Test.h"
+#include "Host.h"
 #include "Followers.h"
 #include "Papyrus.h"
 #include "Tuning.h"
@@ -334,12 +335,13 @@ namespace Test
 					// the player update does not run in the main menu: load from a task a few seconds later
 					std::thread([] {
 						std::this_thread::sleep_for(std::chrono::seconds(3));
-						SKSE::GetTaskInterface()->AddTask([] { LoadSave(); });
+						Host::Tasks()->AddTask([] { LoadSave(); });
 					}).detach();
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};
+		MenuSink g_menuSink;
 	}
 
 	bool Active() { return g_cfg.active; }
@@ -354,10 +356,14 @@ namespace Test
 		g_trace.open("Data/SKSE/Plugins/FollowersWithBrains_Test/trace.csv", std::ios::trunc);
 		g_trace << "time,distPlayer,target,distTarget,inCombat,held(1melee/2ranged),wanted,dealtMelee,dealtRanged,health\n";
 		g_report.open("Data/SKSE/Plugins/FollowersWithBrains_Test/report.txt", std::ios::trunc);
-		static MenuSink sink;
-		RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(&sink);
+		RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(&g_menuSink);
 		if (!g_cfg.commandDir.empty()) Tuning::SetExtraFile(std::filesystem::path{ g_cfg.commandDir } / "tuning.ini");
 		g_phase = Phase::kWaitMenu;
+	}
+
+	void Shutdown()
+	{
+		if (g_cfg.active) RE::UI::GetSingleton()->RemoveEventSink<RE::MenuOpenCloseEvent>(&g_menuSink);
 	}
 
 	void OnGameLoaded()

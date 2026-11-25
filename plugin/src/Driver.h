@@ -42,7 +42,8 @@ namespace Driver
 		std::vector<RE::NiPoint3> path;        // path: the points to run through, in order
 	};
 
-	bool Install();  // animation channel and action hooks (kDataLoaded)
+	bool Install();    // animation channel and action hooks (kDataLoaded)
+	void Uninstall();  // stops all drives and puts the game's functions back (before a hot reload)
 	void Frame(float a_delta);  // every frame, main thread
 
 	bool Start(RE::Actor* a_actor, const Order& a_order);

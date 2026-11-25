@@ -3,6 +3,7 @@
 #include "Tuning.h"
 #include "Recorder.h"
 #include "Lab.h"
+#include "Host.h"
 #include "Loadout.h"
 #include "Papyrus.h"
 #include "Settings.h"
@@ -1954,8 +1955,43 @@ namespace Followers
 		holder->AddEventSink<RE::TESHitEvent>(Sink::Get());
 		holder->AddEventSink<RE::TESDeathEvent>(Sink::Get());
 		holder->AddEventSink<RE::TESMagicEffectApplyEvent>(Sink::Get());
-		SKSE::GetActionEventSource()->AddEventSink(Sink::Get());
+		Host::ActionEvents()->AddEventSink(Sink::Get());
 		logger::info("Hooks and event sinks installed");
+	}
+
+	void Shutdown()
+	{
+		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_PlayerCharacter[0] };
+		vtbl.write_vfunc(0xAD, PlayerUpdate::func.address());
+		REL::Relocation<std::uintptr_t> characterVtbl{ RE::VTABLE_Character[0] };
+		characterVtbl.write_vfunc(0x104, HealthDamage::func.address());
+		REL::Relocation<std::uintptr_t> meleeVtbl{ RE::VTABLE_CombatInventoryItemMelee[0] };
+		meleeVtbl.write_vfunc(0x0C, ItemScore<1>::func.address());
+		meleeVtbl.write_vfunc(0x0F, ItemShouldEquip<1>::func.address());
+		REL::Relocation<std::uintptr_t> rangedVtbl{ RE::VTABLE_CombatInventoryItemRanged[0] };
+		rangedVtbl.write_vfunc(0x0C, ItemScore<2>::func.address());
+		rangedVtbl.write_vfunc(0x0F, ItemShouldEquip<2>::func.address());
+
+		auto holder = RE::ScriptEventSourceHolder::GetSingleton();
+		holder->RemoveEventSink<RE::TESHitEvent>(Sink::Get());
+		holder->RemoveEventSink<RE::TESDeathEvent>(Sink::Get());
+		holder->RemoveEventSink<RE::TESMagicEffectApplyEvent>(Sink::Get());
+		Host::ActionEvents()->RemoveEventSink(Sink::Get());
+
+		Driver::Uninstall();
+		Lab::Shutdown();
+		Test::Shutdown();
+		// put the followers back the way the game had them
+		for (auto& [id, st] : g_state) {
+			auto actor = RE::TESForm::LookupByID<RE::Actor>(id);
+			if (!actor) continue;
+			for (auto [av, amount] : st.avMods) actor->AsActorValueOwner()->ModActorValue(av, -amount);
+			st.avMods.clear();
+			if (st.offsetMode >= 0) Papyrus::ClearOffset(actor);
+			Tactics::Restore(actor);
+		}
+		g_state.clear();
+		logger::info("Hooks and event sinks removed");
 	}
 
 	void Reset()

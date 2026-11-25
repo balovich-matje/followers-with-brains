@@ -7,6 +7,7 @@ namespace Test
 {
 	bool Active();
 	void Install();      // on kDataLoaded
+	void Shutdown();     // before a hot reload
 	void OnGameLoaded(); // on kPostLoadGame
 	void Tick(float a_delta);
 }

@@ -29,13 +29,6 @@ namespace Lab
 			return tm.tm_hour * 3600.0 + tm.tm_min * 60.0 + tm.tm_sec + ms / 1000.0;
 		}
 
-		std::string Stamp()
-		{
-			double n = Now();
-			int    s = static_cast<int>(n);
-			return std::format("{:02}:{:02}:{:02}.{:03}", s / 3600, s / 60 % 60, s % 60, static_cast<int>((n - s) * 1000.0));
-		}
-
 		std::string Clean(std::string_view a_text)
 		{
 			std::string out{ a_text };
@@ -319,53 +312,6 @@ namespace Lab
 				if (!line.empty()) Run(line);
 			}
 		}
-
-		// ---------------------------------------------------------------- the "fwb" console command
-		RE::SCRIPT_PARAMETER g_params[80];  // one per word of a message
-
-		bool Exec(const RE::SCRIPT_PARAMETER*, RE::SCRIPT_FUNCTION::ScriptData*, RE::TESObjectREFR*, RE::TESObjectREFR*,
-			RE::Script* a_script, RE::ScriptLocals*, double&, std::uint32_t&)
-		{
-			std::string text = a_script ? a_script->GetCommand() : "";
-			auto        space = text.find_first_of(" \t");
-			text = space == std::string::npos ? "" : text.substr(space + 1);
-			while (!text.empty() && (text.back() == ' ' || text.back() == '\r' || text.back() == '\n')) text.pop_back();
-			if (text.size() >= 2 && text.front() == '"' && text.back() == '"') text = text.substr(1, text.size() - 2);
-			if (text.empty()) {
-				Print("fwb <message>: sends the message to Claude (and marks this moment in the recording)");
-				return true;
-			}
-			std::ofstream out{ g_dir / "in.txt", std::ios::app };
-			out << Stamp() << '\t' << text << '\n';
-			logger::info("USER: {}", text);
-			Print(std::format("sent: {}", text));
-			return true;
-		}
-
-		void RegisterCommand()
-		{
-			static constexpr std::string_view kCandidates[] = { "ToggleHeapTracking"sv, "DumpNiUpdates"sv, "TestSeenData"sv,
-				"ShowRenderPasses"sv };
-			for (auto name : kCandidates) {
-				auto fn = RE::SCRIPT_FUNCTION::LocateConsoleCommand(name);
-				if (!fn) continue;
-				for (auto& p : g_params) {
-					p.paramName = "word";
-					p.paramType = RE::SCRIPT_PARAM_TYPE::kChar;
-					p.optional = true;
-				}
-				fn->functionName = "fwb";
-				fn->shortName = "";
-				fn->helpString = "Followers With Brains lab: fwb <message>";
-				fn->referenceFunction = false;
-				fn->SetParameters(g_params);
-				fn->executeFunction = &Exec;
-				fn->editorFilter = false;
-				logger::info("LAB console command fwb (in place of {})", name);
-				return;
-			}
-			logger::warn("LAB: no console command slot for fwb");
-		}
 	}
 
 	bool On() { return g_on; }
@@ -383,22 +329,36 @@ namespace Lab
 		auto            now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 		std::tm         tm{};
 		localtime_s(&tm, &now);
-		auto session = g_dir / "sessions" / std::format("{:04}{:02}{:02}-{:02}{:02}{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+		// one session per game launch: the loader names it, so a hot reload keeps writing to it
+		std::string stamp = std::format("{:04}{:02}{:02}-{:02}{:02}{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+		char env[64]{};
+		if (GetEnvironmentVariable("FWB_SESSION", env, sizeof(env)) > 0) stamp = env;
+		auto session = g_dir / "sessions" / stamp;
 		std::filesystem::create_directories(session, ec);
-		g_track.open(session / "track.csv", std::ios::trunc);
+		bool fresh = !std::filesystem::exists(session / "track.csv");
+		g_track.open(session / "track.csv", std::ios::app);
 		if (!g_track) {
 			logger::warn("LAB: can't write to {}", session.string());
 			return;
 		}
-		g_track << "t,id,role,name,x,y,z,heading,speed,hp,hpPct,combat,target,attack,flags,drive,weapon\n";
+		if (fresh) g_track << "t,id,role,name,x,y,z,heading,speed,hp,hpPct,combat,target,attack,flags,drive,weapon\n";
 		g_outOffset = std::filesystem::file_size(g_dir / "out.txt", ec);
 		if (ec) g_outOffset = 0;
 		auto events = RE::ScriptEventSourceHolder::GetSingleton();
 		events->AddEventSink<RE::TESHitEvent>(Events::Get());
 		events->AddEventSink<RE::TESDeathEvent>(Events::Get());
-		RegisterCommand();
 		g_on = true;
 		logger::info("LAB on: {}", session.string());
+	}
+
+	void Shutdown()
+	{
+		if (!g_on) return;
+		auto events = RE::ScriptEventSourceHolder::GetSingleton();
+		events->RemoveEventSink<RE::TESHitEvent>(Events::Get());
+		events->RemoveEventSink<RE::TESDeathEvent>(Events::Get());
+		g_track.close();
+		g_on = false;
 	}
 
 	void Frame(float a_delta)

@@ -721,6 +721,22 @@ namespace Driver
 		return true;
 	}
 
+	void Uninstall()
+	{
+		StopAll();
+		REL::Relocation<std::uintptr_t> speed{ RE::VTABLE_BSTAnimationGraphDataChannel_Actor_float_ActorSpeedChannel_[0] };
+		speed.write_vfunc(1, reinterpret_cast<std::uintptr_t>(ChannelHook<Channel::kSpeed>::original));
+		REL::Relocation<std::uintptr_t> direction{ RE::VTABLE_BSTAnimationGraphDataChannel_Actor_float_ActorDirectionChannel_[0] };
+		direction.write_vfunc(1, reinterpret_cast<std::uintptr_t>(ChannelHook<Channel::kDirection>::original));
+		REL::Relocation<std::uintptr_t> turn{ RE::VTABLE_BSTAnimationGraphDataChannel_Actor_float_ActorTurnDeltaChannel_[0] };
+		turn.write_vfunc(1, reinterpret_cast<std::uintptr_t>(ChannelHook<Channel::kTurn>::original));
+		REL::Relocation<std::uintptr_t> graph{ RE::VTABLE_Character[3] };
+		graph.write_vfunc(1, reinterpret_cast<std::uintptr_t>(GraphHook::original));
+		REL::Relocation<std::uintptr_t> action{ RE::VTABLE_TESActionData[0] };
+		action.write_vfunc(5, reinterpret_cast<std::uintptr_t>(ActionHook::original));
+		logger::info("Movement driver removed");
+	}
+
 	void Frame(float a_delta)
 	{
 		g_frame.fetch_add(1, std::memory_order_relaxed);
