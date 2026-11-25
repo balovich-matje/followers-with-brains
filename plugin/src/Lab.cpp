@@ -321,7 +321,7 @@ namespace Lab
 		}
 
 		// ---------------------------------------------------------------- the "fwb" console command
-		RE::SCRIPT_PARAMETER g_params[24];
+		RE::SCRIPT_PARAMETER g_params[80];  // one per word of a message
 
 		bool Exec(const RE::SCRIPT_PARAMETER*, RE::SCRIPT_FUNCTION::ScriptData*, RE::TESObjectREFR*, RE::TESObjectREFR*,
 			RE::Script* a_script, RE::ScriptLocals*, double&, std::uint32_t&)
