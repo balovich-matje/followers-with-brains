@@ -230,6 +230,7 @@ namespace Lab
 			if (a_token == "draugr2h") return 0x5B752;     // RFAB draugr, level 37, two-handed
 			if (a_token == "spider") return 0x41FB4;       // large frostbite spider, level 25
 			if (a_token == "giantspider") return 0x23AAB;  // giant frostbite spider, level 50
+			if (a_token == "overlord") return 0x0713CC13;  // RFAB draugr overlord (summons skeleton archers); full id, RFAB load order
 			try {
 				return static_cast<RE::FormID>(std::stoul(std::string{ a_token }, nullptr, 16));
 			} catch (...) {
