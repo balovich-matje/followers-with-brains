@@ -246,7 +246,10 @@ namespace Lab
 		{
 			auto& extra = g_extraHealth[a->GetFormID()];
 			float target = std::max(0.0f, a_amount);
-			float delta = target - extra;
+			// what was added before, read from the actor itself (the lab's own count is lost when the brain
+			// is reloaded, and then extra health piled up again): the permanent health modifier
+			float added = a->GetActorValueModifier(RE::ACTOR_VALUE_MODIFIER::kPermanent, RE::ActorValue::kHealth);
+			float delta = target - added;
 			extra = target;
 			auto avo = a->AsActorValueOwner();
 			avo->ModActorValue(RE::ActorValue::kHealth, delta);
