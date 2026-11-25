@@ -9,6 +9,8 @@ namespace Experience
 		{
 			float       xp = 0.0f;       // attacks faced, weighted by how fast she learns
 			float       lastDay = -1.0f;  // game days passed when she last met this kind
+			float       attacks = 0.0f;   // attacks faced
+			float       hurt = 0.0f;      // damage taken, in shares of her health
 			float       tries[4]{};
 			float       avoided[4]{};
 			std::string name;
@@ -45,6 +47,8 @@ namespace Experience
 			float keep = Kept(a_entry);
 			if (keep < 0.999f) {
 				a_entry.xp *= keep;
+				a_entry.attacks *= keep;
+				a_entry.hurt *= keep;
 				for (int w = 0; w < 4; ++w) {
 					a_entry.tries[w] *= keep;
 					a_entry.avoided[w] *= keep;
@@ -120,6 +124,35 @@ namespace Experience
 		auto& entry = Get(a_follower, a_enemy);
 		Refresh(entry);
 		entry.xp += LearnRate(a_follower);
+		entry.attacks += 1.0f;
+	}
+
+	void Hurt(RE::Actor* a_follower, RE::Actor* a_enemy, float a_share)
+	{
+		auto& entry = Get(a_follower, a_enemy);
+		Refresh(entry);
+		entry.hurt += a_share;
+	}
+
+	Stance StanceVs(RE::Actor* a_follower, RE::Actor* a_enemy)
+	{
+		Stance stance;
+		float  base = Tuning::Get().dodgeShare;
+		stance.threshold = base;
+		if (Tuning::Get().practice > 0.0f) return stance;
+		auto it = g_data.find({ a_follower->GetFormID(), KindOf(a_enemy) });
+		if (it == g_data.end()) return stance;
+		auto& e = it->second;
+		// a fight is some 20 attacks: what one costs her, from what they have done to her so far
+		stance.danger = 20.0f * e.hurt / std::max(5.0f, e.attacks);
+		float xp = e.xp * Kept(e);
+		if (xp >= 20.0f && stance.danger < 0.15f) {
+			stance.relaxed = true;   // known and harmless: just cut it down
+			stance.threshold = 0.35f;
+		} else {
+			stance.threshold = base / (1.0f + 4.0f * stance.danger);  // the more they hurt her, the warier
+		}
+		return stance;
 	}
 
 	int PickWay(RE::Actor* a_follower, RE::Actor* a_enemy)
@@ -164,7 +197,10 @@ namespace Experience
 				best = w;
 			}
 		}
-		auto text = std::format("{}: sees {:.0f}% of their attacks coming, reacts in {:.2f}s", entry.name, read.chance * 100.0f, read.delay);
+		auto stance = StanceVs(a_follower, a_enemy);
+		auto text = std::format("{}: sees {:.0f}% of their attacks coming, reacts in {:.2f}s; a fight costs her ~{:.0f}% health, {}",
+			entry.name, read.chance * 100.0f, read.delay, stance.danger * 100.0f,
+			stance.relaxed ? "relaxed (trades hits)" : std::format("dodges hits over {:.0f}% of her health", stance.threshold * 100.0f));
 		if (best >= 0) text += std::format("; best way out: {} ({:.0f} of {:.0f})", kWays[best], entry.avoided[best], entry.tries[best]);
 		return text;
 	}
@@ -181,6 +217,8 @@ namespace Experience
 				a_write(key.second);
 				a_write(e.xp);
 				a_write(e.lastDay);
+				a_write(e.attacks);
+				a_write(e.hurt);
 				for (int w = 0; w < 4; ++w) a_write(e.tries[w]);
 				for (int w = 0; w < 4; ++w) a_write(e.avoided[w]);
 				auto len = static_cast<std::uint32_t>(std::min<std::size_t>(e.name.size(), 200));
@@ -190,7 +228,7 @@ namespace Experience
 		}
 
 		template <class R>
-		std::map<Key, Entry> ReadAll(R&& a_read, bool a_resolve, SKSE::SerializationInterface* a_intfc)
+		std::map<Key, Entry> ReadAll(R&& a_read, bool a_resolve, SKSE::SerializationInterface* a_intfc, std::uint32_t a_version)
 		{
 			std::map<Key, Entry> out;
 			std::uint32_t        count = 0;
@@ -200,6 +238,7 @@ namespace Experience
 				std::uint32_t kind = 0, len = 0;
 				Entry         e;
 				bool ok = a_read(id) && a_read(kind) && a_read(e.xp) && a_read(e.lastDay);
+				if (a_version >= 2) ok = ok && a_read(e.attacks) && a_read(e.hurt);
 				for (int w = 0; w < 4 && ok; ++w) ok = a_read(e.tries[w]);
 				for (int w = 0; w < 4 && ok; ++w) ok = a_read(e.avoided[w]);
 				ok = ok && a_read(len) && len <= 200;
@@ -218,13 +257,13 @@ namespace Experience
 
 	void Save(SKSE::SerializationInterface* a_intfc)
 	{
-		if (!a_intfc->OpenRecord(kRecord, 1)) return;
+		if (!a_intfc->OpenRecord(kRecord, 2)) return;
 		WriteAll([&](auto a_value) { a_intfc->WriteRecordData(a_value); }, g_data);
 	}
 
-	void Load(SKSE::SerializationInterface* a_intfc, std::uint32_t, std::uint32_t)
+	void Load(SKSE::SerializationInterface* a_intfc, std::uint32_t a_version, std::uint32_t)
 	{
-		g_loaded = ReadAll([&](auto& a_value) { return a_intfc->ReadRecordData(a_value) == sizeof(a_value); }, true, a_intfc);
+		g_loaded = ReadAll([&](auto& a_value) { return a_intfc->ReadRecordData(a_value) == sizeof(a_value); }, true, a_intfc, a_version);
 		logger::info("Experience loaded: {} kinds of enemy", g_loaded.size());
 	}
 
@@ -239,6 +278,8 @@ namespace Experience
 	void Stash()
 	{
 		std::ofstream out{ StashPath(), std::ios::binary | std::ios::trunc };
+		std::uint32_t magic = 'FWX2';
+		out.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
 		WriteAll([&](auto a_value) { out.write(reinterpret_cast<const char*>(&a_value), sizeof(a_value)); }, g_data);
 	}
 
@@ -246,7 +287,13 @@ namespace Experience
 	{
 		std::ifstream in{ StashPath(), std::ios::binary };
 		if (!in) return;
-		g_data = ReadAll([&](auto& a_value) { return static_cast<bool>(in.read(reinterpret_cast<char*>(&a_value), sizeof(a_value))); }, false, nullptr);
+		std::uint32_t magic = 0, version = 2;
+		in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+		if (magic != 'FWX2') {
+			version = 1;  // stashed by an older brain
+			in.seekg(0);
+		}
+		g_data = ReadAll([&](auto& a_value) { return static_cast<bool>(in.read(reinterpret_cast<char*>(&a_value), sizeof(a_value))); }, false, nullptr, version);
 		in.close();
 		std::error_code ec;
 		std::filesystem::remove(StashPath(), ec);

@@ -24,6 +24,18 @@ namespace Experience
 	void          Outcome(RE::FormID a_follower, std::uint32_t a_kind, int a_way, bool a_avoided);
 	std::string   Summary(RE::Actor* a_follower, RE::Actor* a_enemy);    // for logs: how she does against it
 
+	// How much that kind of enemy hurts her: a_share is the damage as a share of her health.
+	void Hurt(RE::Actor* a_follower, RE::Actor* a_enemy, float a_share);
+	// How readily she dodges this kind: hits above a_threshold of her health are worth avoiding.
+	// relaxed: she knows it well and it barely hurts her, so she trades hits (big ones only matter).
+	struct Stance
+	{
+		float threshold = 0.2f;
+		bool  relaxed = false;
+		float danger = 0.0f;  // share of her health a typical fight with one of these costs her
+	};
+	Stance StanceVs(RE::Actor* a_follower, RE::Actor* a_enemy);
+
 	// co-save
 	constexpr std::uint32_t kRecord = 'LERN';
 	void Save(SKSE::SerializationInterface* a_intfc);

@@ -981,6 +981,15 @@ namespace Followers
 		std::unordered_map<RE::FormID, RE::ATTACK_STATE_ENUM>         g_enemyAttack;  // last seen attack state
 		std::unordered_map<RE::FormID, bool>                          g_enemyStagger;
 		std::unordered_map<RE::FormID, int>                           g_bashFails;    // enemies that shrug off bashes
+		// damage followers took, for what they learn about their enemies (filled on any thread)
+		struct HurtEvent
+		{
+			RE::FormID      victim;
+			RE::ActorHandle attacker;
+			float           damage;
+		};
+		std::vector<HurtEvent> g_hurt;
+
 		std::vector<RE::ActorHandle> g_lastFollowers;
 		std::vector<RE::ActorHandle> g_lastEnemies;
 
@@ -1070,7 +1079,8 @@ namespace Followers
 				r.bashTime = g_time;
 				++g_stats.bashes;
 				what = "bash";
-			} else if ((power || share > Tuning::Get().dodgeShare) && g_time >= r.dodgeReadyAt &&
+			} else if (auto stance = Experience::StanceVs(f, e); ((power && (!stance.relaxed || share > 0.1f)) || share > stance.threshold) &&
+					   g_time >= r.dodgeReadyAt &&
 					   static_cast<float>(std::rand() % 100) < Tuning::Get().dodgeChance) {
 				if (!power && HasShield(f)) {
 					f->NotifyAnimationGraph("blockStart"sv);
@@ -1902,9 +1912,18 @@ namespace Followers
 			for (auto e : scan.enemies) g_lastEnemies.push_back(e->GetHandle());
 
 			std::vector<QueuedEvent> events;
+			std::vector<HurtEvent>   hurt;
 			{
 				std::scoped_lock lock{ g_lock };
 				events.swap(g_queue);
+				hurt.swap(g_hurt);
+			}
+			for (auto& h : hurt) {
+				auto victim = RE::TESForm::LookupByID<RE::Actor>(h.victim);
+				auto attacker = h.attacker.get().get();
+				if (!victim || !attacker || attacker->IsPlayerRef()) continue;
+				float health = std::max(1.0f, victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kHealth) - Lab::ExtraHealth(victim));
+				Experience::Hurt(victim, attacker, h.damage / health);
 			}
 			for (auto& e : events) HandleEvent(e, scan);
 
@@ -2014,6 +2033,7 @@ namespace Followers
 					std::scoped_lock lock{ g_lock };
 					g_stats.damageTaken += std::abs(a_damage);
 					g_lastFollowerHurt = g_time;
+					g_hurt.push_back({ a_victim->GetFormID(), a_attacker->GetHandle(), std::abs(a_damage) });
 				}
 				if (a_attacker && a_attacker != a_victim && !a_attacker->IsPlayerRef() && a_attacker->IsPlayerTeammate()) {
 					std::scoped_lock lock{ g_lock };
