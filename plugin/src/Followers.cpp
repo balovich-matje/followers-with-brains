@@ -97,7 +97,8 @@ namespace Followers
 			bool  mirroringSprint = false;
 			std::deque<float> pressure;            // melee hits on her and backpedals forced on her (bow in hand)
 			float meleeUntil = 0.0f;               // switched to melee under pressure: keep it until then
-			float shotBlockedAt = -100.0f;         // her last arrow hit scenery (low cover in the way)
+			float shotBlockedAt = -100.0f;
+			float nextConjure = 0.0f;              // conjured blades: next try         // her last arrow hit scenery (low cover in the way)
 			bool  wasKnocked = false;
 			float weaponStuckSince = -1.0f;        // weapon half drawn or half sheathed
 			RE::ActorHandle addsFirstFor;          // a summoner too tough to rush: its summons first
@@ -2474,6 +2475,17 @@ namespace Followers
 					if (playerRanged == 1 ? options.HasRanged() : options.HasMelee()) {
 						Swap(f, s, playerRanged == 1, "matching you");
 					}
+				}
+			}
+
+			// ---- conjured blades: summoned when the player draws or a fight is on and melee is her pick
+			// (nothing ranged in her main hand), and again when they fade
+			if ((inCombat || player->AsActorState()->IsWeaponDrawn()) && !IsRanged(f) && g_time >= s.nextConjure &&
+				!f->AsActorState()->IsBleedingOut()) {
+				auto& options = GetLoadout(f, s);
+				if (options.bound && f->GetEquippedObject(false) != options.boundWeapon) {
+					s.nextConjure = g_time + 4.0f;
+					Loadout::EquipMelee(f, options);
 				}
 			}
 

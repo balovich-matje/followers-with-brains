@@ -336,6 +336,61 @@ namespace Lab
 					Say(std::format("{}: {} {} (weapon {}, weapon state {})", a->GetDisplayFullName(), words[2], took ? "taken" : "refused",
 						drawn ? "drawn" : "sheathed", static_cast<int>(a->AsActorState()->GetWeaponState())));
 				}
+			} else if (cmd == "copyoutfit" && words.size() >= 3) {
+				// copyoutfit <ref id> <who>: copies of the armor and clothes that actor wears, worn by <who>
+				RE::Actor* from = nullptr;
+				try {
+					from = RE::TESForm::LookupByID<RE::Actor>(static_cast<RE::FormID>(std::stoul(words[1], nullptr, 16)));
+				} catch (...) {}
+				auto who = Who(words[2]);
+				if (!from || !who) {
+					Say("copyoutfit: from whom, to whom?");
+					return;
+				}
+				int n = 0;
+				for (auto& [obj, data] : from->GetInventory([](RE::TESBoundObject& o) { return o.Is(RE::FormType::Armor); })) {
+					if (!obj || data.first <= 0 || !data.second || !data.second->IsWorn()) continue;
+					who->AddObjectToContainer(obj, nullptr, 1, nullptr);
+					RE::ActorEquipManager::GetSingleton()->EquipObject(who, obj);
+					++n;
+				}
+				Say(std::format("{} now wears {} pieces like {}", who->GetDisplayFullName(), n, from->GetDisplayFullName()));
+			} else if (cmd == "spellinfo" && words.size() >= 2) {
+				// spellinfo <spell id>: type, delivery, and each effect's archetype, magnitude, duration, form
+				RE::SpellItem* spell = nullptr;
+				try {
+					spell = RE::TESForm::LookupByID<RE::SpellItem>(static_cast<RE::FormID>(std::stoul(words[1], nullptr, 16)));
+				} catch (...) {}
+				if (!spell) {
+					Say("spellinfo: no such spell");
+					return;
+				}
+				std::string out = std::format("type {} delivery {} cost {:.0f}", static_cast<int>(spell->GetSpellType()),
+					static_cast<int>(spell->GetDelivery()), spell->CalculateMagickaCost(nullptr));
+				for (auto e : spell->effects) {
+					if (!e || !e->baseEffect) continue;
+					auto assoc = e->baseEffect->data.associatedForm;
+					out += std::format(" | arch {} av {} mag {} dur {} form {:08X} type {}", static_cast<int>(e->baseEffect->GetArchetype()),
+						static_cast<int>(e->baseEffect->data.primaryAV), e->effectItem.magnitude, e->effectItem.duration,
+						assoc ? assoc->GetFormID() : 0, assoc ? static_cast<int>(assoc->GetFormType()) : -1);
+				}
+				Say(out);
+			} else if (cmd == "learnbooks" && words.size() >= 2) {
+				// learnbooks <who>: every spell book she carries, learned
+				auto who = Who(words[1]);
+				if (!who) return;
+				int n = 0;
+				for (auto& [obj, data] : who->GetInventory([](RE::TESBoundObject& o) { return o.Is(RE::FormType::Book); })) {
+					auto book = obj ? obj->As<RE::TESObjectBOOK>() : nullptr;
+					if (!book || data.first <= 0 || !book->TeachesSpell()) continue;
+					if (auto spell = book->GetSpell()) {
+						who->AddSpell(spell);
+						auto name = spell->GetName();
+						logger::info("LAB {} learns {} {:08X}", who->GetDisplayFullName(), name && *name ? name : "?", spell->GetFormID());
+						++n;
+					}
+				}
+				Say(std::format("{} learns {} spells from her books", who->GetDisplayFullName(), n));
 			} else if (cmd == "take" && words.size() >= 3) {
 				// take <who> <item id> [count]: out of the inventory, gone
 				auto who = Who(words[1]);

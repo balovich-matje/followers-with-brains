@@ -10,6 +10,8 @@ namespace Loadout
 		RE::TESAmmo*       ammo = nullptr;
 		RE::TESObjectWEAP* unusableBow = nullptr;  // carried, but no ammo for it
 		RE::SpellItem*     spell = nullptr;     // best aimed attack spell known
+		RE::SpellItem*     bound = nullptr;     // a conjured-weapon spell that beats her carried melee weapon
+		RE::TESObjectWEAP* boundWeapon = nullptr;
 		float              meleeSkill = 0.0f;
 		float              rangedSkill = 0.0f;
 		float              meleeScore = 0.0f;   // estimated damage per second

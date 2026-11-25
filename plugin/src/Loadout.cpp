@@ -36,6 +36,19 @@ namespace Loadout
 			if (IsAttackSpell(a_spell) && (!a_best || SpellPower(a_spell) > SpellPower(a_best))) a_best = a_spell;
 		}
 
+		// a spell that conjures a melee weapon (bound sword, flame blades...): the weapon it gives
+		RE::TESObjectWEAP* BoundWeapon(RE::SpellItem* a_spell)
+		{
+			if (!a_spell || a_spell->GetSpellType() != RE::MagicSystem::SpellType::kSpell) return nullptr;
+			for (auto effect : a_spell->effects) {
+				auto base = effect ? effect->baseEffect : nullptr;
+				if (!base || base->GetArchetype() != RE::EffectSetting::Archetype::kBoundWeapon) continue;
+				auto weap = base->data.associatedForm ? base->data.associatedForm->As<RE::TESObjectWEAP>() : nullptr;
+				if (weap && weap->IsMelee() && !weap->IsHandToHandMelee()) return weap;
+			}
+			return nullptr;
+		}
+
 		bool IsRangedWeapon(RE::TESObjectWEAP* a_weapon) { return a_weapon && (a_weapon->IsBow() || a_weapon->IsCrossbow()); }
 
 		bool IsTwoHanded(RE::TESObjectWEAP* a_weapon)
@@ -139,6 +152,30 @@ namespace Loadout
 		}
 		for (auto spell : a_actor->GetActorRuntimeData().addedSpells) ConsiderSpell(spell, out.spell);
 
+		// a conjured weapon as her melee weapon, when it hits at least as hard as what she carries
+		// (one-handed ones conjured in both hands)
+		auto considerBound = [&](RE::SpellItem* a_spell) {
+			auto weap = BoundWeapon(a_spell);
+			if (!weap) return;
+			RE::InventoryEntryData entry(weap, 1);
+			float dps = WeaponDps(a_actor, weap, &entry, 0.0f) * (IsTwoHanded(weap) ? 1.0f : 1.6f);
+			if (dps < 1.0f) dps = std::max(out.meleeScore, 1.0f);  // its damage comes from scripts/effects: can't tell, assume good
+			// (what a conjured blade adds on top, fire waves and the like, doesn't show in its base damage:
+			// half as good on paper as a carried weapon is good enough)
+			if (dps >= out.meleeScore * 0.5f && (!out.bound || dps > out.meleeScore)) {
+				out.bound = a_spell;
+				out.boundWeapon = weap;
+				out.melee = weap;
+				out.meleeScore = std::max(dps, out.meleeScore);
+			}
+		};
+		if (auto npc = a_actor->GetActorBase()) {
+			if (auto list = npc->GetSpellList(); list && list->spells) {
+				for (std::uint32_t i = 0; i < list->numSpells; ++i) considerBound(list->spells[i]);
+			}
+		}
+		for (auto spell : a_actor->GetActorRuntimeData().addedSpells) considerBound(spell);
+
 		auto avo = a_actor->AsActorValueOwner();
 		if (out.melee) {
 			out.meleeSkill = avo->GetActorValue(IsTwoHanded(out.melee) ? RE::ActorValue::kTwoHanded : RE::ActorValue::kOneHanded);
@@ -202,7 +239,26 @@ namespace Loadout
 
 	bool EquipMelee(RE::Actor* a_actor, const Options& a_options)
 	{
-		if (!a_options.melee || a_actor->GetEquippedObject(false) == a_options.melee) return false;
+		if (a_options.bound && a_options.boundWeapon) {
+			if (a_actor->GetEquippedObject(false) == a_options.boundWeapon) return false;
+			// paid in magicka like any cast; short of it, her carried weapon
+			auto  avo = a_actor->AsActorValueOwner();
+			float cost = a_options.bound->CalculateMagickaCost(a_actor);
+			bool  both = !IsTwoHanded(a_options.boundWeapon);
+			if (avo->GetActorValue(RE::ActorValue::kMagicka) >= cost * (both ? 2.0f : 1.0f)) {
+				using S = RE::MagicSystem::CastingSource;
+				for (auto source : both ? std::vector{ S::kRightHand, S::kLeftHand } : std::vector{ S::kRightHand }) {
+					if (auto caster = a_actor->GetMagicCaster(source)) {
+						caster->CastSpellImmediate(a_options.bound, false, a_actor, 1.0f, false, 0.0f, a_actor);
+						avo->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kMagicka, -cost);
+					}
+				}
+				auto name = a_options.bound->GetName();
+				logger::info("{} conjures {}{}", a_actor->GetDisplayFullName(), name && *name ? name : "a weapon", both ? " in both hands" : "");
+				return true;
+			}
+		}
+		if (!a_options.melee || a_options.melee == a_options.boundWeapon || a_actor->GetEquippedObject(false) == a_options.melee) return false;
 		RE::ActorEquipManager::GetSingleton()->EquipObject(a_actor, a_options.melee);
 		return true;
 	}
