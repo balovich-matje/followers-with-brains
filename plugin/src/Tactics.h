@@ -5,7 +5,7 @@
 // all with its normal in-combat movement. No stats, perks or skills are touched.
 namespace Tactics
 {
-	void Apply(RE::Actor* a_follower);    // idempotent
+	void Apply(RE::Actor* a_follower, bool a_ranged);  // idempotent; a_ranged: bow, crossbow or staff in hand
 	void Restore(RE::Actor* a_follower);  // back to the original style
 	void Forget();                        // after a load: the copies are gone with the old game
 }

@@ -1970,7 +1970,7 @@ namespace Followers
 			auto& cfg = Settings::Get();
 			auto  player = a_scan.player;
 			auto& s = g_state[f->GetFormID()];
-			Tactics::Apply(f);
+			Tactics::Apply(f, IsRanged(f));
 			constexpr int mode = 0;  // close following
 			int   combatMode = std::clamp(cfg.combatDistance + (g_time < s.healedUntil ? 1 : 0), 0, 2);
 			auto& tune = kTuning[mode];

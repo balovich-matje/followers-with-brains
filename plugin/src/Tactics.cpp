@@ -9,6 +9,7 @@ namespace Tactics
 		{
 			RE::TESCombatStyle* original = nullptr;
 			RE::TESCombatStyle* tuned = nullptr;
+			RE::TESCombatStyle* ranged = nullptr;  // the archer/caster version: shoot, keep distance
 		};
 		std::unordered_map<RE::FormID, Entry> g_entries;  // by base NPC, for the whole session
 
@@ -45,7 +46,22 @@ namespace Tactics
 		}
 	}
 
-	void Apply(RE::Actor* a_follower)
+	// Holding a bow, crossbow or staff, a player keeps their distance and shoots: the style says so
+	// (shooting over closing in, backing off from melee at close range, no circling or flanking).
+	void TuneRanged(RE::TESCombatStyle* s)
+	{
+		auto& g = s->generalData;
+		auto& c = s->closeRangeData;
+		g.rangedScoreMult = std::max({ g.rangedScoreMult, g.meleeScoreMult, 1.0f }) * 1.5f;
+		g.staffScoreMult = std::max({ g.staffScoreMult, g.meleeScoreMult, 1.0f }) * 1.5f;
+		g.meleeScoreMult = std::min(g.meleeScoreMult, 0.2f);
+		c.fallbackMult = std::max(c.fallbackMult, 1.0f);  // step back from someone in her face
+		c.circleMult = std::min(c.circleMult, 0.2f);
+		c.flankDistanceMult = 0.0f;
+		s->flags.reset(RE::TESCombatStyle::FLAG::kFlankingStyle);
+	}
+
+	void Apply(RE::Actor* a_follower, bool a_ranged)
 	{
 		auto npc = a_follower ? a_follower->GetActorBase() : nullptr;
 		if (!npc) return;
@@ -71,14 +87,28 @@ namespace Tactics
 				e.tuned->flags = source->flags;
 			}
 			Tune(e.tuned);
+			e.ranged = factory->Create();
+			if (e.ranged) {
+				e.ranged->generalData = e.tuned->generalData;
+				e.ranged->meleeData = e.tuned->meleeData;
+				e.ranged->closeRangeData = e.tuned->closeRangeData;
+				e.ranged->longRangeData = e.tuned->longRangeData;
+				e.ranged->flightData = e.tuned->flightData;
+				e.ranged->flags = e.tuned->flags;
+				TuneRanged(e.ranged);
+			}
 			logger::info("{}: tuned combat style (avoid threats {:.2f}, strafe {:.2f}, fallback {:.2f}, circle {:.2f})",
 				a_follower->GetDisplayFullName(), e.tuned->generalData.avoidThreatChance, e.tuned->longRangeData.strafeMult,
 				e.tuned->closeRangeData.fallbackMult, e.tuned->closeRangeData.circleMult);
 		}
-		if (npc->combatStyle != e.tuned) npc->combatStyle = e.tuned;
+		auto want = a_ranged && e.ranged ? e.ranged : e.tuned;
+		if (npc->combatStyle != want) {
+			npc->combatStyle = want;
+			logger::info("{}: {} combat style", a_follower->GetDisplayFullName(), want == e.ranged ? "ranged" : "melee");
+		}
 		// a fight already running keeps its own copy of the style pointer
-		if (auto controller = a_follower->GetActorRuntimeData().combatController; controller && controller->combatStyle != e.tuned) {
-			controller->combatStyle = e.tuned;
+		if (auto controller = a_follower->GetActorRuntimeData().combatController; controller && controller->combatStyle != want) {
+			controller->combatStyle = want;
 		}
 	}
 
@@ -88,8 +118,9 @@ namespace Tactics
 		if (!npc) return;
 		auto it = g_entries.find(npc->GetFormID());
 		if (it == g_entries.end()) return;
-		if (npc->combatStyle == it->second.tuned) npc->combatStyle = it->second.original;
-		if (auto controller = a_follower->GetActorRuntimeData().combatController; controller && controller->combatStyle == it->second.tuned) {
+		auto ours = [&](RE::TESCombatStyle* a_style) { return a_style && (a_style == it->second.tuned || a_style == it->second.ranged); };
+		if (ours(npc->combatStyle)) npc->combatStyle = it->second.original;
+		if (auto controller = a_follower->GetActorRuntimeData().combatController; controller && ours(controller->combatStyle)) {
 			controller->combatStyle = it->second.original;
 		}
 		g_entries.erase(it);  // the copy is left to the game (a few bytes)

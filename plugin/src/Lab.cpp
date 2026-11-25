@@ -20,6 +20,7 @@ namespace Lab
 		float                 g_sampleTimer = 0.0f;
 		float                 g_pollTimer = 0.0f;
 		std::uintmax_t        g_outOffset = 0;
+		std::vector<std::pair<RE::FormID, int>> g_stripped;  // weapons taken from a follower for a test
 		bool                  g_playerCombat = false;
 		RE::ActorHandle       g_last;  // last actor spawned by a command
 
@@ -335,6 +336,30 @@ namespace Lab
 					Say(std::format("{}: {} {} (weapon {}, weapon state {})", a->GetDisplayFullName(), words[2], took ? "taken" : "refused",
 						drawn ? "drawn" : "sheathed", static_cast<int>(a->AsActorState()->GetWeaponState())));
 				}
+			} else if (cmd == "strip" && words.size() >= 2) {
+				// strip <who>: her melee weapons into the player's inventory (unstrip gives them back)
+				auto who = Who(words[1]);
+				auto player = RE::PlayerCharacter::GetSingleton();
+				if (!who) return;
+				std::string names;
+				for (auto& [obj, data] : who->GetInventory([](RE::TESBoundObject& o) { return o.Is(RE::FormType::Weapon); })) {
+					auto w = obj->As<RE::TESObjectWEAP>();
+					if (!w || data.first <= 0 || !w->IsMelee() || w->IsStaff()) continue;
+					who->RemoveItem(obj, data.first, RE::ITEM_REMOVE_REASON::kStoreInContainer, nullptr, player);
+					g_stripped.emplace_back(obj->GetFormID(), data.first);
+					names += std::format("{}{}", names.empty() ? "" : ", ", w->GetName());
+				}
+				Say(std::format("{} gives you {}", who->GetDisplayFullName(), names.empty() ? "nothing" : names));
+			} else if (cmd == "unstrip" && words.size() >= 2) {
+				auto who = Who(words[1]);
+				auto player = RE::PlayerCharacter::GetSingleton();
+				if (!who) return;
+				for (auto [id, count] : g_stripped) {
+					if (auto obj = RE::TESForm::LookupByID<RE::TESBoundObject>(id))
+						player->RemoveItem(obj, count, RE::ITEM_REMOVE_REASON::kStoreInContainer, nullptr, who);
+				}
+				Say(std::format("{} gets her weapons back ({})", who->GetDisplayFullName(), g_stripped.size()));
+				g_stripped.clear();
 			} else if (cmd == "restorehealth" && words.size() >= 3) {
 				// restorehealth <who> <amount>: give back health taken by mistake, not counted as test health
 				if (auto a = Who(words[1])) {
