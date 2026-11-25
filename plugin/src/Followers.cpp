@@ -992,6 +992,7 @@ namespace Followers
 			bool  punishApproachStarted = false;
 			RE::ActorHandle against;
 			float bashTime = -100.0f;
+			bool  bashPending = false;
 			bool  offset = false;
 		};
 
@@ -1137,8 +1138,9 @@ namespace Followers
 				enemyReach = std::max(150.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
 			}
 			if (power && bashable) {
+				// the shield goes up first; the bash follows a moment later (the graph refuses it before)
 				f->NotifyAnimationGraph("blockStart"sv);
-				f->NotifyAnimationGraph("bashStart"sv);
+				r.bashPending = true;
 				r.action = 3;
 				r.until = g_time + 0.5f;
 				r.bashTime = g_time;
@@ -1220,7 +1222,11 @@ namespace Followers
 				if (!f || !Alive(f)) continue;
 				auto& r = g_reflex[f->GetFormID()];
 
-				if (r.action == 3 && g_time - r.bashTime > 0.2f && g_time - r.bashTime < 0.35f &&
+				if (r.action == 3 && r.bashPending && g_time - r.bashTime >= 0.08f) {
+					r.bashPending = false;
+					if (!f->NotifyAnimationGraph("bashStart"sv)) f->NotifyAnimationGraph("bashPowerStart"sv);
+				}
+				if (r.action == 3 && !r.bashPending && g_time - r.bashTime > 0.3f && g_time - r.bashTime < 0.45f &&
 					f->AsActorState()->GetAttackState() != RE::ATTACK_STATE_ENUM::kBash) {
 					// the bash did not happen: a dodge instead (the animation), or a short step out of reach
 					auto e = Get(r.against);
