@@ -1977,7 +1977,8 @@ namespace Followers
 		{
 			auto  options = GetLoadout(f, s);
 			// a different weapon of a kind: what she did with the old one says nothing about it
-			RE::FormID now[2] = { options.melee ? options.melee->GetFormID() : 0, options.bow ? options.bow->GetFormID() : 0 };
+			RE::FormID now[2] = { options.melee ? options.melee->GetFormID() : 0,
+				options.bow ? options.bow->GetFormID() : options.spell ? options.spell->GetFormID() : 0 };
 			for (int k = 0; k < 2; ++k) {
 				if (now[k] != s.measuredWith[k]) {
 					s.measuredWith[k] = now[k];
@@ -2927,6 +2928,9 @@ namespace Followers
 					}
 				} else if (type == T::kWeaponSwing) {
 					Queue(EventType::kFollowerSwing, a_event->actor->GetHandle());
+				} else if (type == T::kSpellCast && a_event->actor->IsPlayerTeammate() && a_event->sourceForm) {
+					auto name = a_event->sourceForm->GetName();
+					logger::info("{} casts {}", a_event->actor->GetDisplayFullName(), name && *name ? name : "a spell");
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}

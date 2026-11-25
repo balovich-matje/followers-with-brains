@@ -160,9 +160,12 @@ namespace Loadout
 		return out;
 	}
 
+	// Fighting at range: by the main (right) hand. A dagger with a spell in the off hand is a spellsword
+	// up close (counting the off-hand spell made her back off from blades with a dagger in hand, and
+	// put her stabs into the ranged damage tally).
 	bool HoldsRanged(RE::Actor* a_actor)
 	{
-		for (bool left : { false, true }) {
+		for (bool left : { false }) {
 			auto obj = a_actor->GetEquippedObject(left);
 			if (!obj) continue;
 			if (auto weap = obj->As<RE::TESObjectWEAP>()) {

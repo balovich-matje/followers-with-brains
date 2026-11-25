@@ -432,6 +432,19 @@ namespace Lab
 					RE::ActorEquipManager::GetSingleton()->UnequipObject(who, bound);
 					Say(std::format("{} unequips {}", who->GetDisplayFullName(), bound->GetName()));
 				}
+			} else if (cmd == "skill" && words.size() >= 3) {
+				// skill <who> <Destruction|Alteration|...> [base value]: shows it, or sets the base value
+				auto who = Who(words[1]);
+				auto av = RE::ActorValueList::GetSingleton()->LookupActorValueByName(words[2]);
+				if (!who || av == RE::ActorValue::kNone) {
+					Say("skill: who or which?");
+					return;
+				}
+				auto  avo = who->AsActorValueOwner();
+				float before = avo->GetBaseActorValue(av);
+				if (words.size() >= 4) avo->SetBaseActorValue(av, num(3, before));
+				Say(std::format("{} {}: {:.0f}{}", who->GetDisplayFullName(), words[2], before,
+					words.size() >= 4 ? std::format(" -> {:.0f}", avo->GetBaseActorValue(av)) : std::string{}));
 			} else if (cmd == "learn" && words.size() >= 3) {
 				// learn <who> <spell id>
 				auto who = Who(words[1]);
