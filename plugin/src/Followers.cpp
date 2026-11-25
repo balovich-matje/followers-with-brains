@@ -2227,8 +2227,15 @@ namespace Followers
 
 			// potions: a heal when hurt, buffs at the start of a fight worth it
 			{
-				auto foe = CombatTarget(f);
-				Potions::Update(f, inCombat, Alive(foe) && Experience::StanceVs(f, foe).relaxed, g_time);
+				// fodder only if every enemy in the fight is (a boss's summons are fodder, the boss isn't)
+				bool fodder = !a_scan.enemies.empty();
+				for (auto e : a_scan.enemies) {
+					if (Alive(e) && !Experience::StanceVs(f, e).relaxed) {
+						fodder = false;
+						break;
+					}
+				}
+				Potions::Update(f, inCombat, fodder, g_time);
 			}
 
 			// knocked down: by whom (what hit her just now, or the enemy nearest her)
