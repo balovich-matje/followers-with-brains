@@ -211,6 +211,10 @@ namespace Lab
 			if (a_token == "frosttroll") return 0x23ABB;  // 40
 			if (a_token == "vampire75") return 0x2EAC1;   // Volkihar clan (EncVampire06BossNordM)
 			if (a_token == "vampire90") return 0x3392F;   // night hunter (EncVampire06NordF)
+			if (a_token == "draugr") return 0x3B548;       // RFAB draugr, level 30, one-handed
+			if (a_token == "draugr2h") return 0x5B752;     // RFAB draugr, level 37, two-handed
+			if (a_token == "spider") return 0x41FB4;       // large frostbite spider, level 25
+			if (a_token == "giantspider") return 0x23AAB;  // giant frostbite spider, level 50
 			try {
 				return static_cast<RE::FormID>(std::stoul(std::string{ a_token }, nullptr, 16));
 			} catch (...) {
