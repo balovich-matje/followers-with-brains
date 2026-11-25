@@ -1041,8 +1041,34 @@ namespace Followers
 			r.action = 0;
 		}
 
+		// Charging or casting a spell (or a shout) right now, in any hand.
+		bool IsCasting(RE::Actor* a)
+		{
+			using S = RE::MagicCaster::State;
+			for (auto src : { RE::MagicSystem::CastingSource::kLeftHand, RE::MagicSystem::CastingSource::kRightHand,
+					 RE::MagicSystem::CastingSource::kOther, RE::MagicSystem::CastingSource::kInstant }) {
+				auto caster = a->GetMagicCaster(src);
+				if (!caster) continue;
+				auto st = caster->state.get();
+				if (st != S::kNone && st != S::kReady) return true;
+			}
+			return false;
+		}
+
 		void ReactToAttack(RE::Actor* f, RE::Actor* e, ReflexState& r)
 		{
+			// A spell or a shout being cast is no swing to get out of: its hands are busy, so hit it.
+			if (IsCasting(e)) {
+				auto  weap = f->GetEquippedObject(false);
+				auto  w = weap ? weap->As<RE::TESObjectWEAP>() : nullptr;
+				float reach = w ? std::max(120.0f, w->GetReach() * 140.0f) : 150.0f;
+				if (!IsRanged(f) && Dist(f, e) <= reach + 40.0f && f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone) {
+					StrikeAt(f, e);
+					Debug(std::format("{}: hits {} while it casts", Name(f), Name(e)));
+				}
+				r.cooldownUntil = g_time + 0.6f;
+				return;
+			}
 			auto process = e->GetActorRuntimeData().currentProcess;
 			auto data = process && process->high ? process->high->attackData.get() : nullptr;
 			bool  power = data && data->data.flags.any(RE::AttackData::AttackFlag::kPowerAttack);
@@ -1084,6 +1110,12 @@ namespace Followers
 			}
 
 			const char* what = nullptr;
+			auto        stance = Experience::StanceVs(f, e);
+			bool        worth = (power && (!stance.relaxed || share > 0.1f)) || share > stance.threshold;
+			float       enemyReach = 250.0f;
+			if (auto weap = e->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
+				enemyReach = std::max(150.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
+			}
 			if (power && bashable) {
 				f->NotifyAnimationGraph("blockStart"sv);
 				f->NotifyAnimationGraph("bashStart"sv);
@@ -1092,48 +1124,38 @@ namespace Followers
 				r.bashTime = g_time;
 				++g_stats.bashes;
 				what = "bash";
-			} else if (auto stance = Experience::StanceVs(f, e); ((power && (!stance.relaxed || share > 0.1f)) || share > stance.threshold) &&
-					   g_time >= r.dodgeReadyAt &&
-					   static_cast<float>(std::rand() % 100) < Tuning::Get().dodgeChance) {
-				if (!power && HasShield(f)) {
-					f->NotifyAnimationGraph("blockStart"sv);
-					r.action = 2;
+			} else if (!power && HasShield(f) && !stance.relaxed) {
+				// a shield on her arm: any ordinary swing she sees coming, she takes on it
+				f->NotifyAnimationGraph("blockStart"sv);
+				r.action = 2;
+				r.until = g_time + 0.7f;
+				++g_stats.blocks;
+				what = "block";
+			} else if (worth && g_time >= r.dodgeReadyAt && static_cast<float>(std::rand() % 100) < Tuning::Get().dodgeChance) {
+				// a real dodge animation, left, right or back, as she has learned works best against these;
+				// the slide-back (way 0) only when the animation can't play here
+				int         way = Experience::PickWay(f, e);
+				const char* dir = Driver::Dodge(f, e, way == 1 ? "left" : way == 2 ? "right" : "back");
+				r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown / (1.0f + stance.danger);  // a breather; less against what hurts
+				++g_stats.stepOuts;
+				if (dir) {
+					int taken = dir[0] == 'l' ? 1 : dir[0] == 'r' ? 2 : 3;
+					g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), Experience::KindOf(e), taken, g_time });
+					what = Experience::kWays[taken];
+					r.action = 4;  // strike back once it's done (or keep backing off while it still swings)
 					r.until = g_time + 0.7f;
-					++g_stats.blocks;
-					what = "block";
-				} else if (int way = Experience::PickWay(f, e); way > 0 && [&] {
-					           const char* dir = Driver::Dodge(f, e, way == 1 ? "left" : way == 2 ? "right" : "back");
-					           if (!dir) return false;
-					           // the way actually taken (another one when the chosen side had no room)
-					           int taken = dir[0] == 'l' ? 1 : dir[0] == 'r' ? 2 : 3;
-					           g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), Experience::KindOf(e), taken, g_time });
-					           what = Experience::kWays[taken];
-					           return true;
-				           }()) {
-					// a real dodge (the animation carries her out), strike back once it's done
-					r.action = 4;
-					r.until = g_time + 0.7f;
-					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown / (1.0f + stance.danger);
-					++g_stats.stepOuts;
 				} else {
-					// step back out of reach (offset is in front of the enemy, away from it)
-					float reach = 250.0f;
-					if (auto weap = e->GetEquippedObject(false); weap && weap->As<RE::TESObjectWEAP>()) {
-						reach = std::max(150.0f, weap->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
-					}
 					Driver::Order order;
 					order.kind = Driver::Kind::kStepBack;
 					order.target = e->GetHandle();
 					order.speed = Tuning::Get().stepSpeed;  // a player's diagonal backpedal (measured)
 					order.weave = Tuning::Get().stepDiagonal;
-					order.stopDistance = Dist(f, e) + reach * 0.5f + 80.0f;
+					order.stopDistance = Dist(f, e) + enemyReach * 0.35f + 40.0f;  // just out of reach, no further
 					order.duration = 1.8f;  // the drive ends when the swing is over
 					order.holdWhileAttacked = true;
 					Driver::Start(f, order);
 					r.action = 1;
 					r.until = g_time + 2.0f;
-					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown / (1.0f + stance.danger);  // a breather; less against what hurts
-					++g_stats.stepOuts;
 					g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), Experience::KindOf(e), 0, g_time });
 					what = "step out";
 				}
@@ -1223,7 +1245,11 @@ namespace Followers
 						order.target = e->GetHandle();
 						order.speed = Tuning::Get().stepSpeed;
 						order.weave = Tuning::Get().stepDiagonal;
-						order.stopDistance = Dist(f, e) + 150.0f;
+						float eReach = 250.0f;
+						if (auto ew = e->GetEquippedObject(false); ew && ew->As<RE::TESObjectWEAP>()) {
+							eReach = std::max(150.0f, ew->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
+						}
+						order.stopDistance = std::max(Dist(f, e), eReach + 40.0f);  // just out of its reach
 						order.duration = 1.2f;
 						order.holdWhileAttacked = true;
 						Driver::Start(f, order);
