@@ -149,11 +149,14 @@ namespace Potions
 		}
 
 		// a fight worth it: long-lasting buffs, once, at the start
+		// (the first 15 s of a fight: who is in it shows up over the first moments, a boss after its summons)
 		if (st.buffsLeft > 0 && a_now >= st.buffFrom && st.buffFrom >= 0.0f) {
-			if (a_fodder) {
+			if (a_now > st.buffFrom + 15.0f) {
 				st.buffsLeft = 0;
+				logger::info("{}: no buffs this fight ({})", a_follower->GetDisplayFullName(), a_fodder ? "only fodder" : "none to drink");
 				return;
 			}
+			if (a_fodder) return;
 			for (auto& [potion, kind] : potions) {
 				if (kind != Kind::kBuff || Running(a_follower, potion, kind)) continue;
 				Drink(a_follower, potion, st, a_now, "start of a fight");
