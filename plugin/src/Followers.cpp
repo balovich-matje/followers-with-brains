@@ -2406,6 +2406,9 @@ namespace Followers
 				return;
 			}
 			if (!target) return;
+			// the weapon first: the rules below may end the tick (mowing down a weak enemy did, every tick,
+			// and kept her in melee long after the enemies had turned to the player)
+			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
 			if (cfg.reflexes && Meatgrind(f, s, a_scan, target)) return;
 
 			// ---- a downed (bleeding out, kneeling) enemy: close in and finish it, don't stand back
@@ -2530,7 +2533,6 @@ namespace Followers
 				}
 			}
 			if (MaybeCharge(f, s, target)) return;
-			if (cfg.smartWeapons) UpdateWeapons(f, s, target, false);
 			if (cfg.combatMovement && !s.tagAlong && g_time < s.unreachableUntil && !IsRanged(f) && sameSpace &&
 				Dist(f, target) > 300.0f && !Driver::IsDriving(f)) {
 				s.tagAlong = true;
