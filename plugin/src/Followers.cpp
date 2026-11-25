@@ -1322,9 +1322,9 @@ namespace Followers
 						if (len > 1.0f) {
 							away = away / len;
 							float back = Driver::Room(f, f->GetPosition(), away, 240.0f);
-							if (back < 160.0f) {
+							if (back < 120.0f) {
 								int   sign = (std::rand() % 2) ? 1 : -1;
-								float angles[] = { 35.0f * sign, -35.0f * sign, 70.0f * sign, -70.0f * sign };
+								float angles[] = { 35.0f * sign, -35.0f * sign };  // a step round, not a lap
 								for (float deg : angles) {
 									float        rad = deg * 0.0174533f, c = std::cos(rad), sn = std::sin(rad);
 									RE::NiPoint3 dir{ away.x * c - away.y * sn, away.x * sn + away.y * c, 0.0f };
@@ -1339,10 +1339,10 @@ namespace Followers
 									order.kind = Driver::Kind::kStrafe;
 									order.target = e->GetHandle();
 									order.landing = spot;
-									order.speed = 320.0f;
-									order.duration = 1.2f;
+									order.speed = 260.0f;
+									order.duration = 0.9f;
 									if (Driver::Start(f, order)) {
-										r.nextRoomCheck = g_time + 2.5f;
+										r.nextRoomCheck = g_time + 6.0f;
 										Debug(std::format("{}: wall behind ({:.0f} room), circles {} round {}", Name(f), back, deg > 0 ? "left" : "right", Name(e)));
 									}
 									break;
