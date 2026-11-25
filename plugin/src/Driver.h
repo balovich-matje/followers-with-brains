@@ -62,6 +62,8 @@ namespace Driver
 	// A landing spot near a_point on solid ground: the ground height under it (within a_range up or
 	// down of a_point.z), or false when there is no ground there.
 	bool GroundAt(RE::Actor* a_actor, RE::NiPoint3& a_point, float a_range);
+	// ground all along the straight line between two points (no gap, no stairwell to fall into)
+	bool GroundAlong(RE::Actor* a_actor, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to);
 
 	float ZoneGap(const Order& a_order, RE::Actor* a_actor, RE::Actor* a_target, RE::NiPoint3* a_nearest = nullptr);
 

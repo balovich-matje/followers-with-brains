@@ -947,6 +947,24 @@ namespace Driver
 		return true;
 	}
 
+	bool GroundAlong(RE::Actor* a_actor, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to)
+	{
+		auto cell = a_actor ? a_actor->GetParentCell() : nullptr;
+		auto world = cell ? cell->GetbhkWorld() : nullptr;
+		if (!world) return true;
+		RE::NiPoint3 flat = a_to - a_from;
+		flat.z = 0.0f;
+		int   steps = std::max(1, static_cast<int>(flat.Length() / 60.0f));
+		float top = std::max(a_from.z, a_to.z) + 70.0f;
+		float low = std::min(a_from.z, a_to.z) - 120.0f;
+		for (int i = 1; i <= steps; ++i) {
+			auto p = a_from + (a_to - a_from) * (static_cast<float>(i) / steps);
+			auto hit = Cast(a_actor, world, RE::NiPoint3{ p.x, p.y, top }, RE::NiPoint3{ p.x, p.y, low });
+			if (!hit.hit) return false;
+		}
+		return true;
+	}
+
 	float ZoneGap(const Order& a_order, RE::Actor* a_actor, RE::Actor* a_target, RE::NiPoint3* a_nearest)
 	{
 		float angle, range;

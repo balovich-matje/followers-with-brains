@@ -480,7 +480,7 @@ namespace Followers
 			// which may be an older loop of the route that leads away from the player)
 			for (std::size_t i = g_trail.size(); i-- > 0;) {
 				if (fp.GetDistance(g_trail[i]) < 350.0f && std::fabs(g_trail[i].z - fp.z) < 120.0f &&
-					Driver::ClearLine(f, fp, g_trail[i])) {
+					Driver::ClearLine(f, fp, g_trail[i]) && Driver::GroundAlong(f, fp, g_trail[i])) {
 					start = i;
 					break;
 				}
@@ -511,7 +511,8 @@ namespace Followers
 			if (g_time < s.nextTrail || Driver::IsDriving(f)) return false;
 			if (a_why == "footsteps") {
 				// footsteps runs that hit something right away: give up on them for a while
-				if (g_time - s.footstepsAt < 1.5f && std::string_view{ Driver::LastEnd(f) } == "blocked") ++s.footstepFails;
+				std::string_view last{ Driver::LastEnd(f) };
+				if (g_time - s.footstepsAt < 1.5f && (last == "blocked" || last == "edge")) ++s.footstepFails;
 				if (s.footstepFails >= 2 || Dist(f, a_player) < 200.0f) return false;
 			}
 			s.nextTrail = g_time + a_cooldown;
