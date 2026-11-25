@@ -1117,6 +1117,7 @@ namespace Followers
 			float nextGuardBreak = 0.0f; // a raised guard: a heavy attack into it
 			float nextKite = 0.0f;       // bow or staff in hand: backing off from blades
 			float blindSince = -1.0f;    // bow drawn, target out of sight
+			float drawnSince = -1.0f;    // bow fully drawn and held
 			float blockSince = -1.0f;
 			float guardCheckAt = -1.0f;  // did that heavy attack stagger it?
 			RE::ActorHandle guardTarget;
@@ -1618,6 +1619,58 @@ namespace Followers
 							r.nextKite = g_time + 1.5f;
 							g_state[f->GetFormID()].pressure.push_back(g_time);
 							logger::info("{}: backs off from {} ({:.0f} away) to shoot", Name(f), Name(close), closest);
+						}
+					}
+				}
+
+				// Fully drawn and holding: the game's AI won't loose through a friend (the player brawling with
+				// her target). A player steps sideways for a clear angle.
+				{
+					int  atk = static_cast<int>(f->AsActorState()->GetAttackState());
+					auto e = CombatTarget(f);
+					if (IsRanged(f) && atk == 10 && Alive(e)) {
+						if (r.drawnSince < 0.0f) r.drawnSince = g_time;
+					} else {
+						r.drawnSince = -1.0f;
+					}
+					if (r.drawnSince >= 0.0f && !Driver::IsDriving(f) && Alive(e)) {
+						// a friend near the line of fire
+						auto fp = f->GetPosition(), ep = e->GetPosition();
+						RE::NiPoint3 line = ep - fp;
+						line.z = 0.0f;
+						float len = line.Length();
+						bool  friendInWay = false;
+						auto  inWay = [&](RE::Actor* a) {
+							if (!a || a == f || len < 1.0f) return;
+							RE::NiPoint3 to = a->GetPosition() - fp;
+							to.z = 0.0f;
+							float along = (to.x * line.x + to.y * line.y) / len;
+							if (along <= 0.0f || along >= len) return;
+							float off = std::fabs(to.x * line.y - to.y * line.x) / len;
+							if (off < 70.0f) friendInWay = true;
+						};
+						inWay(RE::PlayerCharacter::GetSingleton());
+						for (auto& h : g_lastFollowers) inWay(Get(h));
+						float held = g_time - r.drawnSince;
+						if ((friendInWay && held > 1.2f) || held > 3.0f) {
+							// round the target by ~45 degrees, to whichever side is open
+							float ang = std::atan2(fp.x - ep.x, fp.y - ep.y);
+							float dist = std::max(300.0f, len);
+							for (float side : { 0.8f, -0.8f }) {
+								RE::NiPoint3 spot{ ep.x + std::sin(ang + side) * dist, ep.y + std::cos(ang + side) * dist, fp.z };
+								if (!Driver::GroundAt(f, spot, 150.0f) || !Driver::ClearLine(f, fp, spot) || !Driver::ClearLine(f, spot, ep)) continue;
+								Driver::Order order;
+								order.kind = Driver::Kind::kStrafe;
+								order.target = e->GetHandle();
+								order.landing = spot;
+								order.speed = 220.0f;  // a drawn-bow walk
+								order.duration = 2.5f;
+								if (Driver::Start(f, order)) {
+									logger::info("{}: no clear shot at {} ({}), steps round", Name(f), Name(e), friendInWay ? "a friend in the way" : "held too long");
+									r.drawnSince = g_time;
+								}
+								break;
+							}
 						}
 					}
 				}
