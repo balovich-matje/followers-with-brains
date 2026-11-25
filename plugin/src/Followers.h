@@ -18,6 +18,9 @@ namespace Followers
 	};
 	DebugInfo GetDebugInfo(RE::Actor* a_actor);
 
+	// The followers and enemies seen by the last logic pass (for the lab recorder).
+	void Tracked(std::vector<RE::Actor*>& a_followers, std::vector<RE::Actor*>& a_enemies);
+
 	// Co-save: undoes temporary speed boosts that were active when the game was saved.
 	void OnSave(SKSE::SerializationInterface* a_intfc);
 	void OnLoad(SKSE::SerializationInterface* a_intfc);

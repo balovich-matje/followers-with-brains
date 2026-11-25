@@ -2,6 +2,7 @@
 #include "Driver.h"
 #include "Tuning.h"
 #include "Recorder.h"
+#include "Lab.h"
 #include "Loadout.h"
 #include "Papyrus.h"
 #include "Settings.h"
@@ -1887,6 +1888,7 @@ namespace Followers
 		HealthDamage::func = characterVtbl.write_vfunc(0x104, HealthDamage::thunk);
 		Driver::Install();
 		Recorder::Install();
+		Lab::Install();
 		REL::Relocation<std::uintptr_t> meleeVtbl{ RE::VTABLE_CombatInventoryItemMelee[0] };
 		ItemScore<1>::func = meleeVtbl.write_vfunc(0x0C, ItemScore<1>::thunk);
 		ItemShouldEquip<1>::func = meleeVtbl.write_vfunc(0x0F, ItemShouldEquip<1>::thunk);
@@ -1943,6 +1945,7 @@ namespace Followers
 		g_logicTimer += a_delta;
 		Driver::Frame(a_delta);
 		Recorder::Frame(a_delta);
+		Lab::Frame(a_delta);
 		UpdateReflexes();
 		if (g_logicTimer < kLogicInterval) return;
 		g_logicTimer = 0.0f;
@@ -1950,6 +1953,16 @@ namespace Followers
 		auto player = RE::PlayerCharacter::GetSingleton();
 		if (!player || !player->Is3DLoaded()) return;
 		RunLogic(player);
+	}
+
+	void Tracked(std::vector<RE::Actor*>& a_followers, std::vector<RE::Actor*>& a_enemies)
+	{
+		for (auto& h : g_lastFollowers) {
+			if (auto a = h.get().get()) a_followers.push_back(a);
+		}
+		for (auto& h : g_lastEnemies) {
+			if (auto a = h.get().get()) a_enemies.push_back(a);
+		}
 	}
 
 	DebugInfo GetDebugInfo(RE::Actor* a_actor)

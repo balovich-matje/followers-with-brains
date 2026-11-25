@@ -806,6 +806,22 @@ namespace Driver
 
 	bool IsDriving(RE::Actor* a_actor) { return a_actor && g_drives.contains(a_actor->GetFormID()); }
 
+	const char* Current(RE::Actor* a_actor)
+	{
+		if (!a_actor) return "";
+		auto it = g_drives.find(a_actor->GetFormID());
+		if (it == g_drives.end()) return "";
+		switch (it->second.order.kind) {
+		case Kind::kCharge: return "charge";
+		case Kind::kStepBack: return "stepback";
+		case Kind::kRunTo: return "runto";
+		case Kind::kFormation: return "formation";
+		case Kind::kHop: return "hop";
+		case Kind::kPath: return "path";
+		}
+		return "?";
+	}
+
 	const char* LastEnd(RE::Actor* a_actor)
 	{
 		if (!a_actor) return "";

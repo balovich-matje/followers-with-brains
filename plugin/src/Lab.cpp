@@ -1,0 +1,418 @@
+#include "Lab.h"
+#include "Driver.h"
+#include "Followers.h"
+#include "Papyrus.h"
+
+namespace Lab
+{
+	namespace
+	{
+		const std::filesystem::path kConfig{ "Data/SKSE/Plugins/FollowersWithBrains_Lab.ini" };
+
+		bool                  g_on = false;
+		std::filesystem::path g_dir;
+		std::ofstream         g_track;
+		float                 g_sampleTimer = 0.0f;
+		float                 g_pollTimer = 0.0f;
+		std::uintmax_t        g_outOffset = 0;
+		bool                  g_playerCombat = false;
+		RE::ActorHandle       g_last;  // last actor spawned by a command
+
+		// local time of day in seconds (matches the [HH:MM:SS.mmm] stamps of the plugin log)
+		double Now()
+		{
+			auto now = std::chrono::system_clock::now();
+			auto t = std::chrono::system_clock::to_time_t(now);
+			std::tm tm{};
+			localtime_s(&tm, &t);
+			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+			return tm.tm_hour * 3600.0 + tm.tm_min * 60.0 + tm.tm_sec + ms / 1000.0;
+		}
+
+		std::string Stamp()
+		{
+			double n = Now();
+			int    s = static_cast<int>(n);
+			return std::format("{:02}:{:02}:{:02}.{:03}", s / 3600, s / 60 % 60, s % 60, static_cast<int>((n - s) * 1000.0));
+		}
+
+		std::string Clean(std::string_view a_text)
+		{
+			std::string out{ a_text };
+			for (auto& c : out) {
+				if (c == ',' || c == '\n' || c == '\r') c = ' ';
+			}
+			return out;
+		}
+
+		const char* Name(RE::TESObjectREFR* a) { return a ? a->GetDisplayFullName() : "none"; }
+
+		void Print(std::string_view a_text)
+		{
+			if (auto console = RE::ConsoleLog::GetSingleton()) console->Print("[FWB] %s", std::string{ a_text }.c_str());
+		}
+
+		void Say(std::string_view a_text)
+		{
+			Print(a_text);
+			RE::DebugNotification(std::string{ a_text }.c_str());
+			logger::info("LAB say: {}", a_text);
+		}
+
+		void RunConsole(std::string_view a_command)
+		{
+			auto factory = RE::IFormFactory::GetConcreteFormFactoryByType<RE::Script>();
+			auto script = factory ? factory->Create() : nullptr;
+			if (!script) {
+				Print("can't run console commands");
+				return;
+			}
+			script->SetCommand(a_command);
+			script->CompileAndRun(nullptr);
+			delete script;
+			logger::info("LAB console: {}", a_command);
+		}
+
+		// ---------------------------------------------------------------- recorder
+		void Sample(RE::Actor* a, char a_role)
+		{
+			if (!a || !a->Is3DLoaded()) return;
+			auto  pos = a->GetPosition();
+			auto  st = a->AsActorState();
+			auto  avo = a->AsActorValueOwner();
+			float hp = avo->GetActorValue(RE::ActorValue::kHealth);
+			float maxHp = avo->GetPermanentActorValue(RE::ActorValue::kHealth);
+			auto  target = a->GetActorRuntimeData().currentCombatTarget.get();
+			bool  stagger = false;
+			a->GetGraphVariableBool("IsStaggering", stagger);
+			auto        right = a->GetEquippedObject(false);
+			std::string weapon = right ? Clean(right->GetName()) : "";
+			RE::NiPoint3 vel;
+			a->GetLinearVelocity(vel);
+			vel.z = 0.0f;
+			g_track << std::format("{:.3f},{:08X},{},{},{:.0f},{:.0f},{:.0f},{:.0f},{:.0f},{:.0f},{:.2f},{},{:08X},{},{}{}{}{}{}{}{},{},{}\n",
+				Now(), a->GetFormID(), a_role, Clean(a->GetDisplayFullName()), pos.x, pos.y, pos.z,
+				a->GetAngleZ() * 57.2958f, vel.Length(), hp, maxHp > 0.0f ? hp / maxHp : 0.0f, a->IsInCombat() ? 1 : 0,
+				target ? target->GetFormID() : 0u, static_cast<int>(st->GetAttackState()),
+				st->IsWeaponDrawn() ? "D" : "", st->IsSprinting() ? "S" : "", st->IsSneaking() ? "K" : "",
+				a->IsBlocking() ? "B" : "", stagger ? "G" : "", st->IsBleedingOut() ? "L" : "", a->IsDead() ? "X" : "",
+				Driver::Current(a), weapon);
+		}
+
+		void Record()
+		{
+			auto player = RE::PlayerCharacter::GetSingleton();
+			if (!player || !player->Is3DLoaded()) return;
+			std::vector<RE::Actor*> followers, enemies;
+			Followers::Tracked(followers, enemies);
+			Sample(player, 'P');
+			for (auto f : followers) Sample(f, 'F');
+			for (auto e : enemies) {
+				if (e->GetPosition().GetDistance(player->GetPosition()) < 6000.0f) Sample(e, 'E');
+			}
+			if (auto last = g_last.get().get(); last && std::find(enemies.begin(), enemies.end(), last) == enemies.end()) {
+				Sample(last, 'S');
+			}
+			bool combat = player->IsInCombat();
+			if (combat != g_playerCombat) {
+				g_playerCombat = combat;
+				logger::info("LAB combat {}", combat ? "start" : "end");
+			}
+			static int flush = 0;
+			if (++flush % 10 == 0) g_track.flush();
+		}
+
+		// hits and deaths near the player, into the plugin log
+		struct Events :
+			public RE::BSTEventSink<RE::TESHitEvent>,
+			public RE::BSTEventSink<RE::TESDeathEvent>
+		{
+			static Events* Get()
+			{
+				static Events instance;
+				return &instance;
+			}
+
+			static bool Near(RE::TESObjectREFR* a)
+			{
+				auto player = RE::PlayerCharacter::GetSingleton();
+				return a && player && a->GetPosition().GetDistance(player->GetPosition()) < 6000.0f;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESHitEvent* a_event, RE::BSTEventSource<RE::TESHitEvent>*) override
+			{
+				if (!a_event || !g_on) return RE::BSEventNotifyControl::kContinue;
+				auto cause = a_event->cause.get();  // raw pointers
+				auto target = a_event->target.get();
+				if (!Near(target)) return RE::BSEventNotifyControl::kContinue;
+				auto        flags = a_event->flags;
+				std::string what;
+				if (flags.any(RE::TESHitEvent::Flag::kPowerAttack)) what += " power";
+				if (flags.any(RE::TESHitEvent::Flag::kBashAttack)) what += " bash";
+				if (flags.any(RE::TESHitEvent::Flag::kHitBlocked)) what += " blocked";
+				if (flags.any(RE::TESHitEvent::Flag::kSneakAttack)) what += " sneak";
+				auto source = RE::TESForm::LookupByID(a_event->source);
+				logger::info("LAB hit {} ({:08X}) -> {} ({:08X}){} [{}]", Name(cause), cause ? cause->GetFormID() : 0u,
+					Name(target), target->GetFormID(), what, source ? source->GetName() : "");
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESDeathEvent* a_event, RE::BSTEventSource<RE::TESDeathEvent>*) override
+			{
+				if (!a_event || !g_on || !a_event->dead) return RE::BSEventNotifyControl::kContinue;
+				auto dead = a_event->actorDying.get();
+				if (Near(dead)) logger::info("LAB death {} ({:08X})", Name(dead), dead->GetFormID());
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
+		// ---------------------------------------------------------------- commands from the helper
+		RE::Actor* Who(std::string_view a_token)
+		{
+			auto player = RE::PlayerCharacter::GetSingleton();
+			if (a_token == "player") return player;
+			std::vector<RE::Actor*> followers, enemies;
+			Followers::Tracked(followers, enemies);
+			if (a_token.starts_with("follower")) {
+				std::size_t i = a_token.size() > 8 ? static_cast<std::size_t>(a_token[8] - '1') : 0;
+				return i < followers.size() ? followers[i] : nullptr;
+			}
+			if (a_token == "last") return g_last.get().get();
+			if (a_token == "enemy") {
+				RE::Actor* best = nullptr;
+				float      bestDist = 1e9f;
+				for (auto e : enemies) {
+					float d = e->GetPosition().GetDistance(player->GetPosition());
+					if (!e->IsDead() && d < bestDist) {
+						best = e;
+						bestDist = d;
+					}
+				}
+				return best;
+			}
+			try {
+				auto form = RE::TESForm::LookupByID(static_cast<RE::FormID>(std::stoul(std::string{ a_token }, nullptr, 16)));
+				return form ? form->As<RE::Actor>() : nullptr;
+			} catch (...) {
+				return nullptr;
+			}
+		}
+
+		RE::FormID BaseFor(std::string_view a_token)
+		{
+			// level 25 bandits from Skyrim.esm (same as the test harness)
+			if (a_token == "bandit") return 0x39D21;
+			if (a_token == "archer") return 0x37C47;
+			if (a_token == "brute") return 0x3DE83;
+			try {
+				return static_cast<RE::FormID>(std::stoul(std::string{ a_token }, nullptr, 16));
+			} catch (...) {
+				return 0;
+			}
+		}
+
+		void AddHealth(RE::Actor* a, float a_amount)
+		{
+			auto avo = a->AsActorValueOwner();
+			avo->ModActorValue(RE::ActorValue::kHealth, a_amount);
+			avo->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, 1e6f);
+		}
+
+		void Run(std::string_view a_line)
+		{
+			std::vector<std::string> words;
+			{
+				std::istringstream in{ std::string{ a_line } };
+				for (std::string w; in >> w;) words.push_back(w);
+			}
+			if (words.empty()) return;
+			auto  rest = [&](std::size_t i) {
+                std::size_t pos = 0;
+                for (std::size_t k = 0; k < i && pos != std::string_view::npos; ++k) {
+                    pos = a_line.find_first_not_of(" \t", pos);
+                    pos = a_line.find_first_of(" \t", pos);
+                }
+                if (pos == std::string_view::npos) return std::string{};
+                pos = a_line.find_first_not_of(" \t", pos);
+                return pos == std::string_view::npos ? std::string{} : std::string{ a_line.substr(pos) };
+			};
+			auto  num = [&](std::size_t i, float a_default) {
+				try {
+					return i < words.size() ? std::stof(words[i]) : a_default;
+				} catch (...) {
+					return a_default;
+				}
+			};
+			auto  player = RE::PlayerCharacter::GetSingleton();
+			auto& cmd = words[0];
+			logger::info("LAB command: {}", a_line);
+
+			if (cmd == "say") {
+				Say(rest(1));
+			} else if (cmd == "console") {
+				RunConsole(rest(1));
+			} else if (cmd == "shot") {
+				logger::info("LAB shot {}", rest(1));
+			} else if (cmd == "spawn" && words.size() >= 2) {
+				// spawn <bandit|archer|brute|base id> [extra health] [distance ahead] [side offset]
+				auto base = RE::TESForm::LookupByID<RE::TESBoundObject>(BaseFor(words[1]));
+				if (!base) {
+					Say(std::format("spawn: no such base {}", words[1]));
+					return;
+				}
+				auto ref = player->PlaceObjectAtMe(base, false);
+				auto actor = ref ? ref->As<RE::Actor>() : nullptr;
+				if (!actor) {
+					Say("spawn failed");
+					return;
+				}
+				float extra = num(2, 0.0f), dist = num(3, 700.0f), side = num(4, 0.0f);
+				if (extra > 0.0f) AddHealth(actor, extra);
+				float z = player->GetAngleZ();
+				Papyrus::MoveTo(actor, player, std::sin(z) * dist + std::cos(z) * side, std::cos(z) * dist - std::sin(z) * side);
+				g_last = actor->GetHandle();
+				Say(std::format("spawned {} {:08X}", actor->GetDisplayFullName(), actor->GetFormID()));
+			} else if (cmd == "fight" && words.size() >= 3) {
+				// fight <who> <target> [both]
+				auto a = Who(words[1]);
+				auto b = Who(words[2]);
+				if (!a || !b) {
+					Say("fight: who?");
+					return;
+				}
+				Papyrus::StartCombat(a, b);
+				if (words.size() >= 4 && words[3] == "both" && !b->IsPlayerRef()) Papyrus::StartCombat(b, a);
+				Say(std::format("{} fights {}", a->GetDisplayFullName(), b->GetDisplayFullName()));
+			} else if (cmd == "health" && words.size() >= 3) {
+				// health <who> <extra>: more health, fully healed
+				if (auto a = Who(words[1])) {
+					AddHealth(a, num(2, 0.0f));
+					Say(std::format("{} health {:.0f}", a->GetDisplayFullName(), a->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth)));
+				}
+			} else if (cmd == "stop" && words.size() >= 2) {
+				if (auto a = Who(words[1])) {
+					Papyrus::StopCombat(a);
+					Say(std::format("{} stops fighting", a->GetDisplayFullName()));
+				}
+			} else {
+				Say(std::format("unknown lab command: {}", cmd));
+			}
+		}
+
+		void Poll()
+		{
+			auto            path = g_dir / "out.txt";
+			std::error_code ec;
+			auto            size = std::filesystem::file_size(path, ec);
+			if (ec || size == g_outOffset) return;
+			if (size < g_outOffset) g_outOffset = 0;  // file replaced
+			std::ifstream in{ path, std::ios::binary };
+			in.seekg(static_cast<std::streamoff>(g_outOffset));
+			std::string chunk(static_cast<std::size_t>(size - g_outOffset), '\0');
+			in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+			auto end = chunk.rfind('\n');
+			if (end == std::string::npos) return;  // wait for a whole line
+			g_outOffset += end + 1;
+			std::istringstream lines{ chunk.substr(0, end) };
+			for (std::string line; std::getline(lines, line);) {
+				if (!line.empty() && line.back() == '\r') line.pop_back();
+				if (!line.empty()) Run(line);
+			}
+		}
+
+		// ---------------------------------------------------------------- the "fwb" console command
+		RE::SCRIPT_PARAMETER g_params[24];
+
+		bool Exec(const RE::SCRIPT_PARAMETER*, RE::SCRIPT_FUNCTION::ScriptData*, RE::TESObjectREFR*, RE::TESObjectREFR*,
+			RE::Script* a_script, RE::ScriptLocals*, double&, std::uint32_t&)
+		{
+			std::string text = a_script ? a_script->GetCommand() : "";
+			auto        space = text.find_first_of(" \t");
+			text = space == std::string::npos ? "" : text.substr(space + 1);
+			while (!text.empty() && (text.back() == ' ' || text.back() == '\r' || text.back() == '\n')) text.pop_back();
+			if (text.size() >= 2 && text.front() == '"' && text.back() == '"') text = text.substr(1, text.size() - 2);
+			if (text.empty()) {
+				Print("fwb <message>: sends the message to Claude (and marks this moment in the recording)");
+				return true;
+			}
+			std::ofstream out{ g_dir / "in.txt", std::ios::app };
+			out << Stamp() << '\t' << text << '\n';
+			logger::info("USER: {}", text);
+			Print(std::format("sent: {}", text));
+			return true;
+		}
+
+		void RegisterCommand()
+		{
+			static constexpr std::string_view kCandidates[] = { "ToggleHeapTracking"sv, "DumpNiUpdates"sv, "TestSeenData"sv,
+				"ShowRenderPasses"sv };
+			for (auto name : kCandidates) {
+				auto fn = RE::SCRIPT_FUNCTION::LocateConsoleCommand(name);
+				if (!fn) continue;
+				for (auto& p : g_params) {
+					p.paramName = "word";
+					p.paramType = RE::SCRIPT_PARAM_TYPE::kChar;
+					p.optional = true;
+				}
+				fn->functionName = "fwb";
+				fn->shortName = "";
+				fn->helpString = "Followers With Brains lab: fwb <message>";
+				fn->referenceFunction = false;
+				fn->SetParameters(g_params);
+				fn->executeFunction = &Exec;
+				fn->editorFilter = false;
+				logger::info("LAB console command fwb (in place of {})", name);
+				return;
+			}
+			logger::warn("LAB: no console command slot for fwb");
+		}
+	}
+
+	bool On() { return g_on; }
+
+	void Install()
+	{
+		if (!std::filesystem::exists(kConfig)) return;
+		std::ifstream in{ kConfig };
+		for (std::string line; std::getline(in, line);) {
+			if (!line.empty() && line.back() == '\r') line.pop_back();
+			if (line.starts_with("Dir=")) g_dir = line.substr(4);
+		}
+		if (g_dir.empty()) return;
+		std::error_code ec;
+		auto            now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+		std::tm         tm{};
+		localtime_s(&tm, &now);
+		auto session = g_dir / "sessions" / std::format("{:04}{:02}{:02}-{:02}{:02}{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+		std::filesystem::create_directories(session, ec);
+		g_track.open(session / "track.csv", std::ios::trunc);
+		if (!g_track) {
+			logger::warn("LAB: can't write to {}", session.string());
+			return;
+		}
+		g_track << "t,id,role,name,x,y,z,heading,speed,hp,hpPct,combat,target,attack,flags,drive,weapon\n";
+		g_outOffset = std::filesystem::file_size(g_dir / "out.txt", ec);
+		if (ec) g_outOffset = 0;
+		auto events = RE::ScriptEventSourceHolder::GetSingleton();
+		events->AddEventSink<RE::TESHitEvent>(Events::Get());
+		events->AddEventSink<RE::TESDeathEvent>(Events::Get());
+		RegisterCommand();
+		g_on = true;
+		logger::info("LAB on: {}", session.string());
+	}
+
+	void Frame(float a_delta)
+	{
+		if (!g_on) return;
+		g_sampleTimer += a_delta;
+		g_pollTimer += a_delta;
+		if (g_sampleTimer >= 0.1f) {
+			g_sampleTimer = 0.0f;
+			Record();
+		}
+		if (g_pollTimer >= 0.25f) {
+			g_pollTimer = 0.0f;
+			Poll();
+		}
+	}
+}

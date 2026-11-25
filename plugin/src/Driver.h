@@ -65,4 +65,6 @@ namespace Driver
 
 	// Why the last drive of this actor ended (for logs and tests).
 	const char* LastEnd(RE::Actor* a_actor);
+	// The kind of drive in progress ("charge", "stepback", ...), or "" when not driven.
+	const char* Current(RE::Actor* a_actor);
 }
