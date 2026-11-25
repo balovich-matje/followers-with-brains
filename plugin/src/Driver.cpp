@@ -147,7 +147,9 @@ namespace Driver
 					return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
 				});
 			};
-			return starts("moveStop") || starts("attackStart") || starts("attackPowerStart") || starts("bowAttackStart") ||
+			// idles (looking around, stretching...) put the legs in a standing pose under a moving body
+			bool idle = starts("Idle") && !starts("IdleStop") && !starts("IdleForceDefaultState");
+			return idle || starts("moveStop") || starts("attackStart") || starts("attackPowerStart") || starts("bowAttackStart") ||
 			       starts("blockStart") || starts("bashStart") || starts("turnStop") || starts("SprintStop");
 		}
 
@@ -195,6 +197,7 @@ namespace Driver
 			float       pickRange = 200.0f;
 			float       lastSpeed = 0.0f;
 			bool        hopStarted = false;
+			bool        idleCleared = false;
 			std::size_t pathIndex = 0;
 			float       zoneHeading = 0.0f;
 			bool        wasInZone = false;
@@ -408,6 +411,7 @@ namespace Driver
 				slot->frame.store(g_frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			}
 			if (!d.moveSent || d.elapsed - d.lastMoveKick > 1.0f) {
+				if (!d.moveSent) Send(a, "IdleStop"sv);  // end an idle she was standing in
 				Send(a, "moveStart"sv);
 				d.moveSent = true;
 				d.lastMoveKick = d.elapsed;
@@ -646,6 +650,11 @@ namespace Driver
 				d.standing = true;
 			} else if (speed > 60.0f) {
 				auto weaponState = static_cast<int>(state->GetWeaponState());
+				// setting off: end any idle she was playing while standing (or she slides in its pose)
+				if (d.standing || !d.idleCleared) {
+					Send(a, "IdleStop"sv);
+					d.idleCleared = true;
+				}
 				if (d.standing || weaponState != d.lastWeaponState || d.elapsed - d.lastMoveKick > 1.0f) {
 					d.moveSent = false;
 					d.lastMoveKick = d.elapsed;
