@@ -336,6 +336,17 @@ namespace Lab
 					Say(std::format("{}: {} {} (weapon {}, weapon state {})", a->GetDisplayFullName(), words[2], took ? "taken" : "refused",
 						drawn ? "drawn" : "sheathed", static_cast<int>(a->AsActorState()->GetWeaponState())));
 				}
+			} else if (cmd == "take" && words.size() >= 3) {
+				// take <who> <item id> [count]: out of the inventory, gone
+				auto who = Who(words[1]);
+				RE::TESBoundObject* item = nullptr;
+				try {
+					item = RE::TESForm::LookupByID<RE::TESBoundObject>(static_cast<RE::FormID>(std::stoul(words[2], nullptr, 16)));
+				} catch (...) {}
+				if (who && item) {
+					who->RemoveItem(item, words.size() >= 4 ? static_cast<int>(num(3, 1.0f)) : 1, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
+					Say(std::format("{} loses {}", who->GetDisplayFullName(), item->GetName()));
+				}
 			} else if (cmd == "strip" && words.size() >= 2) {
 				// strip <who>: her melee weapons into the player's inventory (unstrip gives them back)
 				auto who = Who(words[1]);

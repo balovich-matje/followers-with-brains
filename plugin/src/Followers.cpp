@@ -95,6 +95,8 @@ namespace Followers
 			float bestTargetTime = 0.0f;
 			float lastSprintKick = -100.0f;
 			bool  mirroringSprint = false;
+			std::deque<float> pressure;            // melee hits on her and backpedals forced on her (bow in hand)
+			float meleeUntil = 0.0f;               // switched to melee under pressure: keep it until then
 			bool  wasKnocked = false;
 			float weaponStuckSince = -1.0f;        // weapon half drawn or half sheathed
 			RE::ActorHandle addsFirstFor;          // a summoner too tough to rush: its summons first
@@ -1043,6 +1045,7 @@ namespace Followers
 				if (a && b && IsFollower(a, player) && b != player && !b->IsPlayerTeammate() && Alive(b)) TallyHit(a, b);
 				if (a && b && IsFollower(b, player)) {
 					auto& s = g_state[b->GetFormID()];
+					if (IsRanged(b) && g_time - s.lastMeleeHitTime > 0.4f) s.pressure.push_back(g_time);  // one swing, one count
 					s.lastMeleeHitTime = g_time;
 					s.lastMeleeAttacker = a->GetHandle();
 				}
@@ -1107,6 +1110,7 @@ namespace Followers
 			float nextOpening = 0.0f;    // looking for an opening to strike
 			float nextGuardBreak = 0.0f; // a raised guard: a heavy attack into it
 			float nextKite = 0.0f;       // bow or staff in hand: backing off from blades
+			float blindSince = -1.0f;    // bow drawn, target out of sight
 			float blockSince = -1.0f;
 			float guardCheckAt = -1.0f;  // did that heavy attack stagger it?
 			RE::ActorHandle guardTarget;
@@ -1606,8 +1610,27 @@ namespace Followers
 						order.duration = 1.5f;
 						if (Driver::Start(f, order)) {
 							r.nextKite = g_time + 1.5f;
+							g_state[f->GetFormID()].pressure.push_back(g_time);
 							logger::info("{}: backs off from {} ({:.0f} away) to shoot", Name(f), Name(close), closest);
 						}
+					}
+				}
+
+				// Bow drawn but the target behind a pillar: a player lowers the bow and walks round at full
+				// speed instead of creeping along drawn.
+				{
+					int  atk = static_cast<int>(f->AsActorState()->GetAttackState());
+					auto e = CombatTarget(f);
+					bool unused = false;
+					if (IsRanged(f) && atk >= 8 && atk <= 10 && Alive(e) && !f->HasLineOfSight(e, unused)) {
+						if (r.blindSince < 0.0f) r.blindSince = g_time;
+						if (g_time - r.blindSince > 0.6f) {
+							bool took = f->NotifyAnimationGraph("attackStop"sv);
+							logger::info("{}: {} out of sight, lowers the bow ({})", Name(f), Name(e), took ? "taken" : "refused");
+							r.blindSince = -1.0f;
+						}
+					} else {
+						r.blindSince = -1.0f;
 					}
 				}
 
@@ -1884,11 +1907,24 @@ namespace Followers
 			auto& cfg = Settings::Get();
 			float bias = cfg.combatDistance == 0 ? 1.25f : (cfg.combatDistance == 2 ? 0.8f : 1.0f);
 			if (options.PrefersRanged(bias)) {
-				// archer/mage: keep shooting, melee only when an enemy is in their face
-				if (d < 300.0f) {
+				// archer/mage: shoot from afar while the enemies go for the player. When they go for her and
+				// backing off doesn't shake them (hits keep landing, backpedal after backpedal), a player
+				// pulls the melee weapon, if it isn't much worse; back to the bow once they leave her be.
+				while (!s.pressure.empty() && g_time - s.pressure.front() > 10.0f) s.pressure.pop_front();
+				bool onHer = false;
+				for (auto& h : g_lastEnemies) {
+					auto e = Get(h);
+					if (Alive(e) && CombatTarget(e) == f && Dist(f, e) < 600.0f) onHer = true;
+				}
+				bool pressured = s.pressure.size() >= 3 && NearestEnemyDist(f) < 400.0f;
+				bool meleeWorth = options.HasMelee() && options.meleeScore >= options.rangedScore * 0.6f;
+				if (pressured && meleeWorth) {
+					s.meleeUntil = g_time + 6.0f;
 					SetWeaponPref(f, 1);
-					if (ranged) Swap(f, s, false, "enemy in their face");
-				} else if (d > 600.0f) {
+					if (ranged) Swap(f, s, false, std::format("they keep catching her ({} in 10 s)", s.pressure.size()));
+				} else if (!ranged && onHer && g_time < s.meleeUntil + 6.0f) {
+					s.meleeUntil = std::max(s.meleeUntil, g_time + 1.0f);  // still on her: keep fighting
+				} else if (g_time >= s.meleeUntil) {
 					SetWeaponPref(f, 2);
 					if (!ranged) Swap(f, s, true, "back to range");
 				}
