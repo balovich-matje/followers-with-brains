@@ -1363,6 +1363,9 @@ namespace Followers
 				auto f = Get(fh);
 				if (!f || !Alive(f)) continue;
 				auto& r = g_reflex[f->GetFormID()];
+				// knocked down or getting up: nothing to do until she's on her feet (stepping in only
+				// started drives that ended at once, over and over)
+				if (f->AsActorState()->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal) continue;
 
 				if (r.action == 3 && r.bashPending && g_time - r.bashTime >= 0.08f) {
 					r.bashPending = false;
