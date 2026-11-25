@@ -198,6 +198,10 @@ namespace Driver
 			float       lastSpeed = 0.0f;
 			bool        hopStarted = false;
 			bool        idleCleared = false;
+			// the facing this drive gives the body: kept here, not read back from the actor, so the AI
+			// turning her each frame (toward its own goal) can't drag her off the way she runs
+			float       facing = 0.0f;
+			bool        hasFacing = false;
 			std::size_t pathIndex = 0;
 			float       zoneHeading = 0.0f;
 			bool        wasInZone = false;
@@ -396,7 +400,11 @@ namespace Driver
 			auto  ground = Cast(a, a_world, RE::NiPoint3{ next.x, next.y, top }, RE::NiPoint3{ next.x, next.y, std::min(pos.z, goal.z) - 120.0f });
 			if (!ground.hit) return "edge";
 			next.z = ground.point.z;
-			float heading = TurnToward(a->GetAngleZ(), Heading(move), 8.0f * dt);
+			if (!d.hasFacing) {
+				d.facing = a->GetAngleZ();
+				d.hasFacing = true;
+			}
+			float heading = d.facing = TurnToward(d.facing, Heading(move), 8.0f * dt);
 			a->SetPosition(next, true);
 			a->SetRotationZ(heading);
 			float scale = RE::bhkWorld::GetWorldScale();
@@ -606,7 +614,11 @@ namespace Driver
 			}
 
 			float dt = std::min(a_delta, 0.05f);
-			float heading = TurnToward(a->GetAngleZ(), face, (d.order.kind == Kind::kFormation ? 4.0f : 8.0f) * dt);
+			if (!d.hasFacing) {
+				d.facing = a->GetAngleZ();
+				d.hasFacing = true;
+			}
+			float heading = d.facing = TurnToward(d.facing, face, (d.order.kind == Kind::kFormation ? 4.0f : 8.0f) * dt);
 			float        speed = d.speedNow >= 0.0f ? d.speedNow : d.order.speed;
 			d.speedNow = -1.0f;
 			float        step = speed * dt;
