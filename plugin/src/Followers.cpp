@@ -972,6 +972,8 @@ namespace Followers
 			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash, 4 dodge animation
 			float nextRoomCheck = 0.0f;  // keeping room to back off (wall behind her?)
 			float nextOpening = 0.0f;    // looking for an opening to strike
+			float nextFlankCheck = 0.0f; // enemies getting behind her?
+			float nextRegroup = 0.0f;    // outnumbered: back to the player's side
 			float idleSince = -1.0f;     // her target standing idle since
 			RE::ActorHandle seen;      // an attack she has seen coming, to react to at reactAt
 			float reactAt = -1.0f;
@@ -1410,6 +1412,59 @@ namespace Followers
 							r.idleSince = -1.0f;
 							logger::info("{}: opening, {} {} ({})", Name(f), Dist(f, e) <= reach + 30.0f ? "strikes" : "steps in on", Name(e),
 								casting ? "it casts" : "it stands there");
+						}
+					}
+				}
+
+				// Outnumbered, as a player plays it: don't let them get behind you (step so they're all in
+				// front), and don't fight a crowd alone far from your partner (fall back to the player's side).
+				if (r.action == 0 && r.reactAt < 0.0f && !Driver::IsDriving(f) && !IsRanged(f) && g_time >= r.nextFlankCheck) {
+					r.nextFlankCheck = g_time + 0.5f;
+					auto target = CombatTarget(f);
+					if (Alive(target)) {
+						auto         fp = f->GetPosition();
+						RE::NiPoint3 toT = target->GetPosition() - fp;
+						toT.z = 0.0f;
+						float tl = toT.Length();
+						RE::Actor* flanker = nullptr;
+						int        close = 0;
+						for (auto& h : g_lastEnemies) {
+							auto o = Get(h);
+							if (!Alive(o) || Dist(f, o) > 350.0f) continue;
+							++close;
+							if (o == target || tl < 1.0f) continue;
+							RE::NiPoint3 toO = o->GetPosition() - fp;
+							toO.z = 0.0f;
+							float ol = toO.Length();
+							if (ol > 1.0f && (toO.x * toT.x + toO.y * toT.y) / (ol * tl) < -0.35f) flanker = o;  // >110 degrees off
+						}
+						if (flanker && f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone) {
+							// step to the side away from the one behind, so both end up in front of her
+							RE::NiPoint3 toO = flanker->GetPosition() - fp;
+							bool         flankerLeft = (toT.x * toO.y - toT.y * toO.x) > 0.0f;
+							const char*  side = Driver::Dodge(f, target, flankerLeft ? "right" : "left");
+							if (side && side[0] != 'b') {
+								r.action = 4;
+								r.until = g_time + 0.7f;
+								r.against = target->GetHandle();
+								r.nextFlankCheck = g_time + 3.0f;
+								logger::info("{}: {} getting behind her, side-steps {}", Name(f), Name(flanker), side);
+							}
+						} else if (close >= 3 && g_time >= r.nextRegroup) {
+							auto player = RE::PlayerCharacter::GetSingleton();
+							float pd = Dist(f, player);
+							if (pd > 450.0f && pd < 1500.0f && Reachable(f, player)) {
+								Driver::Order order;
+								order.kind = Driver::Kind::kRunTo;
+								order.target = player->GetHandle();
+								order.speed = Tuning::Get().closeSpeed;
+								order.stopDistance = 250.0f;
+								order.duration = 2.0f;
+								if (Driver::Start(f, order)) {
+									r.nextRegroup = g_time + 8.0f;
+									logger::info("{}: {} enemies on her, falls back to your side", Name(f), close);
+								}
+							}
 						}
 					}
 				}
