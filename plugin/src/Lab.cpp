@@ -1,4 +1,5 @@
 #include "Lab.h"
+#include "Potions.h"
 
 extern "C" __declspec(dllimport) int __stdcall SetEnvironmentVariableA(const char* a_name, const char* a_value);
 #include "Driver.h"
@@ -334,6 +335,21 @@ namespace Lab
 					bool drawn = a->AsActorState()->IsWeaponDrawn();
 					Say(std::format("{}: {} {} (weapon {}, weapon state {})", a->GetDisplayFullName(), words[2], took ? "taken" : "refused",
 						drawn ? "drawn" : "sheathed", static_cast<int>(a->AsActorState()->GetWeaponState())));
+				}
+			} else if (cmd == "potions" && words.size() >= 2) {
+				if (auto a = Who(words[1])) Say(std::format("{}: {}", a->GetDisplayFullName(), Potions::Describe(a)));
+			} else if (cmd == "give" && words.size() >= 3) {
+				// give <who> <item id> [count]: into the inventory, not equipped (potions stay potions)
+				auto who = Who(words[1]);
+				RE::TESBoundObject* item = nullptr;
+				try {
+					item = RE::TESForm::LookupByID<RE::TESBoundObject>(static_cast<RE::FormID>(std::stoul(words[2], nullptr, 16)));
+				} catch (...) {}
+				if (who && item) {
+					who->AddObjectToContainer(item, nullptr, words.size() >= 4 ? static_cast<int>(num(3, 1.0f)) : 1, nullptr);
+					Say(std::format("{} gets {}", who->GetDisplayFullName(), item->GetName()));
+				} else {
+					Say("give: who or what?");
 				}
 			} else if (cmd == "base" && words.size() >= 2) {
 				// base <ref id>: what a placed actor is made from (to spawn it again later)

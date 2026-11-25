@@ -5,6 +5,7 @@
 #include "Lab.h"
 #include "Bodies.h"
 #include "Experience.h"
+#include "Potions.h"
 #include "Host.h"
 #include "Loadout.h"
 #include "Papyrus.h"
@@ -2224,6 +2225,12 @@ namespace Followers
 				}
 			}
 
+			// potions: a heal when hurt, buffs at the start of a fight worth it
+			{
+				auto foe = CombatTarget(f);
+				Potions::Update(f, inCombat, Alive(foe) && Experience::StanceVs(f, foe).relaxed, g_time);
+			}
+
 			// knocked down: by whom (what hit her just now, or the enemy nearest her)
 			{
 				bool knocked = fstate->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal;
@@ -2812,6 +2819,7 @@ namespace Followers
 		g_knockTally.clear();
 		g_futile.clear();
 		g_guardBreaks.clear();
+		Potions::Forget();
 		{
 			std::scoped_lock lock{ g_lock };
 			g_queue.clear();
