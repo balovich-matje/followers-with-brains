@@ -324,6 +324,23 @@ namespace Lab
 					Papyrus::StopCombat(a);
 					Say(std::format("{} stops fighting", a->GetDisplayFullName()));
 				}
+			} else if (cmd == "clearbodies") {
+				// clearbodies [radius]: remove the dead (not followers) around the player
+				int  removed = 0;
+				auto tes = RE::TES::GetSingleton();
+				if (tes) {
+					std::vector<RE::Actor*> dead;
+					tes->ForEachReferenceInRange(player, num(1, 4000.0f), [&](RE::TESObjectREFR& a_ref) {
+						auto actor = a_ref.As<RE::Actor>();
+						if (actor && actor->IsDead() && !actor->IsPlayerTeammate() && !actor->IsPlayerRef()) dead.push_back(actor);
+						return RE::BSContainer::ForEachResult::kContinue;
+					});
+					for (auto actor : dead) {
+						actor->Disable();
+						++removed;
+					}
+				}
+				Say(std::format("removed {} bodies", removed));
 			} else if (cmd == "tune" && words.size() >= 2) {
 				// tune <Key> <value> | tune <Key> (back to default) | tune reset: written to the lab's
 				// tuning.ini, which is read after the normal tuning (kept across loads and reloads)
