@@ -116,11 +116,18 @@ namespace Loadout
 			auto& slot = current->IsBolt() ? bolts : arrows;
 			if (!slot) slot = current;
 		}
-		float bowDps = 0.0f, crossbowDps = 0.0f;
+		float bowDps = 0.0f, crossbowDps = 0.0f, staffDps = 0.0f;
+		RE::TESObjectWEAP* staff = nullptr;
 		for (auto& [obj, data] : inventory) {
 			auto weap = data.first > 0 ? obj->As<RE::TESObjectWEAP>() : nullptr;
-			if (!weap || weap->IsStaff() || !weap->GetPlayable()) continue;
+			if (!weap || !weap->GetPlayable()) continue;
 			auto entry = data.second.get();
+			if (weap->IsStaff()) {
+				// a staff shoots its enchantment: about one cast a second and a half
+				float dps = EnchantDamage(entry, weap) / 1.5f;
+				if (dps > staffDps) { staffDps = dps; staff = weap; }
+				continue;
+			}
 			if (weap->IsBow()) {
 				float dps = WeaponDps(a_actor, weap, entry, arrows ? arrows->data.damage : 0.0f);
 				if (dps > bowDps) { bowDps = dps; bow = weap; }
@@ -143,6 +150,11 @@ namespace Loadout
 			out.rangedScore = bowDps;
 		} else {
 			out.unusableBow = bow ? bow : crossbow;
+		}
+		if (staff && staffDps > out.rangedScore) {
+			out.bow = staff;
+			out.ammo = nullptr;
+			out.rangedScore = staffDps;
 		}
 
 		if (auto npc = a_actor->GetActorBase()) {

@@ -511,6 +511,17 @@ namespace Lab
 					who->AddSpell(spell);
 					Say(std::format("{} learns {}", who->GetDisplayFullName(), spell->GetName()));
 				}
+			} else if (cmd == "forget" && words.size() >= 3) {
+				// forget <who> <spell id>
+				auto who = Who(words[1]);
+				RE::SpellItem* spell = nullptr;
+				try {
+					spell = RE::TESForm::LookupByID<RE::SpellItem>(static_cast<RE::FormID>(std::stoul(words[2], nullptr, 16)));
+				} catch (...) {}
+				if (who && spell) {
+					who->RemoveSpell(spell);
+					Say(std::format("{} forgets {}", who->GetDisplayFullName(), spell->GetName()));
+				}
 			} else if (cmd == "clearbodies") {
 				// clearbodies [radius]: remove the dead (not followers) around the player
 				int  removed = 0;
