@@ -1435,7 +1435,8 @@ namespace Followers
 
 				// A target some way off and she isn't getting closer (the game's circling spirals in slowly):
 				// run at it, as a player would.
-				if (r.action == 0 && r.punishAt < 0.0f && !Driver::IsDriving(f) && !IsRanged(f) && g_time >= r.approachCheck) {
+				if (r.action == 0 && r.punishAt < 0.0f && !Driver::IsDriving(f) && !IsRanged(f) && g_time >= r.approachCheck &&
+				    !f->AsActorState()->IsBleedingOut()) {
 					r.approachCheck = g_time + 1.0f;
 					auto  target = CombatTarget(f);
 					float d = Alive(target) ? Dist(f, target) : -1.0f;
@@ -2116,10 +2117,21 @@ namespace Followers
 				} else if (td < s.bestTargetDist - 100.0f) {
 					s.bestTargetDist = td;
 					s.bestTargetTime = g_time;
-				} else if (td > 300.0f && g_time - s.bestTargetTime > 5.0f && g_time >= s.unreachableUntil) {
-					s.unreachableUntil = g_time + 8.0f;
+				} else if (f->AsActorState()->IsBleedingOut() || g_time < s.hazardUntil || IsRanged(f)) {
+					// down, in a trap, or shooting: not getting closer says nothing about the way there
+					s.bestTargetDist = td;
 					s.bestTargetTime = g_time;
-					Debug(std::format("{} can't reach {}", Name(f), Name(target)));
+				} else if (td > 300.0f && g_time - s.bestTargetTime > 5.0f && g_time >= s.unreachableUntil) {
+					s.bestTargetTime = g_time;
+					if (Reachable(f, target)) {
+						// level ground and a clear line: it is backing off (a caster keeping its distance), not out
+						// of reach. A player runs it down rather than pulling a bow.
+						s.bestTargetDist = td;
+						Debug(std::format("{} keeps after {} (it backs off)", Name(f), Name(target)));
+					} else {
+						s.unreachableUntil = g_time + 8.0f;
+						Debug(std::format("{} can't reach {}", Name(f), Name(target)));
+					}
 				}
 				// the pathfinder can't get there: take the player's route, if it passes near the target
 				if (cfg.combatMovement && g_time < s.unreachableUntil && !Driver::IsDriving(f) && RunTrail(f, s, player, target, "to the enemy")) {
@@ -2224,7 +2236,7 @@ namespace Followers
 				s.samplePos = f->GetPosition();
 				s.sampleTime = g_time;
 				bool farFromTarget = Dist(f, target) > 280.0f;
-				if (farFromTarget && moved < 50.0f) {
+				if (farFromTarget && moved < 50.0f && !f->AsActorState()->IsBleedingOut()) {
 					if (s.stuckSince < 0.0f) s.stuckSince = g_time;
 				} else {
 					s.stuckSince = -1.0f;
