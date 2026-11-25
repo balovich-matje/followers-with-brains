@@ -1,4 +1,6 @@
 #include "Lab.h"
+
+extern "C" __declspec(dllimport) int __stdcall SetEnvironmentVariableA(const char* a_name, const char* a_value);
 #include "Driver.h"
 #include "Followers.h"
 #include "Papyrus.h"
@@ -405,6 +407,9 @@ namespace Lab
 		if (fresh) g_track << "t,id,role,name,x,y,z,heading,speed,hp,hpPct,combat,target,attack,flags,drive,weapon\n";
 		g_outOffset = std::filesystem::file_size(g_dir / "out.txt", ec);
 		if (ec) g_outOffset = 0;
+		// a hot reload: carry on where the old brain stopped reading (commands sent meanwhile still run)
+		char offset[32]{};
+		if (GetEnvironmentVariable("FWB_OUT_OFFSET", offset, sizeof(offset)) > 0) g_outOffset = std::strtoull(offset, nullptr, 10);
 		auto events = RE::ScriptEventSourceHolder::GetSingleton();
 		events->AddEventSink<RE::TESHitEvent>(Events::Get());
 		events->AddEventSink<RE::TESDeathEvent>(Events::Get());
@@ -421,6 +426,7 @@ namespace Lab
 		events->RemoveEventSink<RE::TESHitEvent>(Events::Get());
 		events->RemoveEventSink<RE::TESDeathEvent>(Events::Get());
 		g_track.close();
+		SetEnvironmentVariableA("FWB_OUT_OFFSET", std::to_string(g_outOffset).c_str());
 		g_on = false;
 	}
 
