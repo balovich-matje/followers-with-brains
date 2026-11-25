@@ -442,12 +442,13 @@ namespace Followers
 			if (g_trail.size() < 3) return out;
 			auto        fp = f->GetPosition();
 			std::size_t start = g_trail.size();
-			float       best = 350.0f;
-			for (std::size_t i = 0; i < g_trail.size(); ++i) {
-				float d = fp.GetDistance(g_trail[i]);
-				if (d < best && std::fabs(g_trail[i].z - fp.z) < 120.0f && Driver::ClearLine(f, fp, g_trail[i])) {
-					best = d;
+			// join the trail at its most recent point she can walk straight to (not the nearest one,
+			// which may be an older loop of the route that leads away from the player)
+			for (std::size_t i = g_trail.size(); i-- > 0;) {
+				if (fp.GetDistance(g_trail[i]) < 350.0f && std::fabs(g_trail[i].z - fp.z) < 120.0f &&
+					Driver::ClearLine(f, fp, g_trail[i])) {
 					start = i;
+					break;
 				}
 			}
 			if (start >= g_trail.size()) return out;
@@ -474,6 +475,11 @@ namespace Followers
 			float a_cooldown = 4.0f)
 		{
 			if (g_time < s.nextTrail || Driver::IsDriving(f)) return false;
+			if (a_why == "footsteps") {
+				// footsteps runs that hit something right away: give up on them for a while
+				if (g_time - s.footstepsAt < 1.5f && std::string_view{ Driver::LastEnd(f) } == "blocked") ++s.footstepFails;
+				if (s.footstepFails >= 2 || Dist(f, a_player) < 300.0f) return false;
+			}
 			s.nextTrail = g_time + a_cooldown;
 			RE::NiPoint3 goal;
 			if (a_goal) goal = a_goal->GetPosition();
@@ -483,6 +489,10 @@ namespace Followers
 				auto pp = a_player->GetPosition();
 				while (!route.empty() && route.back().GetDistance(pp) < 140.0f) route.pop_back();
 				if (route.size() < 2) return false;
+				// a route much longer than the way there (a loop): not worth it
+				float length = route.front().GetDistance(f->GetPosition());
+				for (std::size_t i = 1; i < route.size(); ++i) length += route[i].GetDistance(route[i - 1]);
+				if (length > 2.5f * f->GetPosition().GetDistance(pp) + 300.0f) return false;
 			}
 			if (route.empty()) return false;
 			Driver::Order order;
@@ -1367,6 +1377,10 @@ namespace Followers
 			}
 
 			// the driver moves this follower right now (a charge, a dodge): leave it alone
+			// in the player's footsteps and already next to them: the formation takes over
+			if (std::string_view{ Driver::Current(f) } == "path" && g_time - s.footstepsAt < 30.0f && dist < 200.0f && !inCombat) {
+				Driver::Stop(f);
+			}
 			if (Driver::IsDriving(f) && !s.formationDrive && !s.tagAlong) return;
 
 			// ---- keep-offset follow
@@ -1388,7 +1402,6 @@ namespace Followers
 						s.pathNoted = true;
 					}
 					// walk in the player's footsteps: their route is known to be walkable
-					if (!s.pathNoted && lastEnd == "blocked" && g_time - s.footstepsAt < 1.5f) ++s.footstepFails;
 					if (!s.pathNoted && s.footstepFails < 2 && RunTrail(f, s, player, nullptr, "footsteps", 0.5f)) {
 						s.pathNoted = true;
 					}
