@@ -163,7 +163,9 @@ namespace Experience
 		int   best = 0;
 		float bestScore = -1.0f;
 		for (int w = 0; w < 4; ++w) {
-			float score = (entry.avoided[w] * keep + 1.0f) / (entry.tries[w] * keep + 2.0f) + (std::rand() % 100) * 0.0001f;
+			// a slight lean toward backing off at first: it works against most things until she knows better
+			float prior = w == 0 ? 2.0f : 1.0f;
+			float score = (entry.avoided[w] * keep + prior) / (entry.tries[w] * keep + prior + 1.0f) + (std::rand() % 100) * 0.0001f;
 			if (score > bestScore) {
 				bestScore = score;
 				best = w;

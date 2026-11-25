@@ -1101,7 +1101,7 @@ namespace Followers
 					// a real dodge (the animation carries her out), strike back once it's done
 					r.action = 4;
 					r.until = g_time + 0.7f;
-					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown;
+					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown / (1.0f + stance.danger);
 					++g_stats.stepOuts;
 				} else {
 					// step back out of reach (offset is in front of the enemy, away from it)
@@ -1120,7 +1120,7 @@ namespace Followers
 					Driver::Start(f, order);
 					r.action = 1;
 					r.until = g_time + 2.0f;
-					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown;  // a breather before the next dodge
+					r.dodgeReadyAt = g_time + Tuning::Get().dodgeCooldown / (1.0f + stance.danger);  // a breather; less against what hurts
 					++g_stats.stepOuts;
 					g_outcomes.push_back({ f->GetFormID(), e->GetHandle(), Experience::KindOf(e), 0, g_time });
 					what = "step out";
@@ -1203,6 +1203,20 @@ namespace Followers
 						EndReflex(f, r);
 						r.punishAt = g_time;
 						r.punishApproachStarted = false;
+					} else if (!Driver::IsDriving(f) && Dist(f, e) < 400.0f) {
+						// the dodge didn't take her far enough (an enemy that tracks her): keep backing off
+						// until its swing is over, then strike
+						Driver::Order order;
+						order.kind = Driver::Kind::kStepBack;
+						order.target = e->GetHandle();
+						order.speed = Tuning::Get().stepSpeed;
+						order.weave = Tuning::Get().stepDiagonal;
+						order.stopDistance = Dist(f, e) + 150.0f;
+						order.duration = 1.2f;
+						order.holdWhileAttacked = true;
+						Driver::Start(f, order);
+						r.action = 1;  // a step out from here on: it ends with the swing, then she punishes
+						r.until = g_time + 2.0f;
 					}
 				}
 				if (r.action != 0 && r.action != 4 && g_time >= r.until) {
