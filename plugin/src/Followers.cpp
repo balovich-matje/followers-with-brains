@@ -112,6 +112,8 @@ namespace Followers
 			float firstMissTime = 0.0f;
 			RE::ActorHandle lastAttacker;
 			float lastAttackedTime = -100.0f;
+			float lastMeleeHitTime = -100.0f;  // what dodges are judged by: a tracking spell landing mid-dodge isn't a failed dodge
+			RE::ActorHandle lastMeleeAttacker;
 
 			// melee: stuck short of the target
 			RE::NiPoint3 samplePos;
@@ -134,6 +136,7 @@ namespace Followers
 			kPlayerCast,
 			kFollowerSwing,
 			kHit,
+			kMeleeHit,  // a weapon or claw that connected (not a spell, an arrow or a lingering effect)
 			kDeath,
 			kHazard  // b = an actor hurt by something that isn't an actor (a trap, fire, a fall)
 		};
@@ -920,6 +923,13 @@ namespace Followers
 				}
 				break;
 
+			case EventType::kMeleeHit:  // a = attacker, b = victim
+				if (a && b && IsFollower(b, player)) {
+					auto& s = g_state[b->GetFormID()];
+					s.lastMeleeHitTime = g_time;
+					s.lastMeleeAttacker = a->GetHandle();
+				}
+				break;
 			case EventType::kHit:  // a = attacker, b = victim
 				if (!a || !b) break;
 				if (a == player && !b->IsPlayerTeammate() && Alive(b)) {
@@ -1213,7 +1223,7 @@ namespace Followers
 					continue;
 				}
 				auto& st = g_state[it->follower];
-				bool  hit = st.lastAttackedTime > it->time && st.lastAttackedTime <= it->time + 1.0f && st.lastAttacker == it->enemy;
+				bool  hit = st.lastMeleeHitTime > it->time && st.lastMeleeHitTime <= it->time + 1.0f && st.lastMeleeAttacker == it->enemy;
 				Experience::Outcome(it->follower, it->kind, it->way, !hit);
 				auto e = Get(it->enemy);
 				logger::info("{} vs {}: {}", Experience::kWays[it->way], e ? Name(e) : "enemy", hit ? "hit" : "avoided");
@@ -2419,6 +2429,11 @@ namespace Followers
 			{
 				if (a_event && a_event->cause && a_event->target) {
 					Queue(EventType::kHit, HandleOf(a_event->cause.get()), HandleOf(a_event->target.get()));
+					auto source = a_event->source ? RE::TESForm::LookupByID(a_event->source) : nullptr;
+					auto weap = source ? source->As<RE::TESObjectWEAP>() : nullptr;
+					if (!a_event->projectile && (!source || (weap && weap->IsMelee()))) {
+						Queue(EventType::kMeleeHit, HandleOf(a_event->cause.get()), HandleOf(a_event->target.get()));
+					}
 				}
 				if (a_event && a_event->target && (!a_event->cause || !a_event->cause->As<RE::Actor>())) {
 					Queue(EventType::kHazard, {}, HandleOf(a_event->target.get()));
