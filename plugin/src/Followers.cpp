@@ -94,6 +94,8 @@ namespace Followers
 			float bestTargetTime = 0.0f;
 			float lastSprintKick = -100.0f;
 			bool  mirroringSprint = false;
+			RE::NiPoint3 sprintCheckPos;           // sprinting on the spot (the AI sprinting into something)
+			float sprintCheckTime = -1.0f;
 			// measured damage while holding each kind of weapon (0 melee, 1 ranged)
 			float dealt[2]{};
 			float heldTime[2]{};
@@ -2028,6 +2030,26 @@ namespace Followers
 				f->SetGraphVariableBool("IsSprinting", false);
 				f->NotifyAnimationGraph("SprintStop"sv);
 				s.mirroringSprint = false;
+			}
+
+			// sprinting on the spot (the combat AI sprints her into a coffin, a wall, a crowd): a player lets
+			// go of sprint when they aren't getting anywhere
+			if (fstate->IsSprinting() && !Driver::IsDriving(f)) {
+				if (s.sprintCheckTime < 0.0f) {
+					s.sprintCheckTime = g_time;
+					s.sprintCheckPos = f->GetPosition();
+				} else if (g_time - s.sprintCheckTime >= 0.6f) {
+					if (f->GetPosition().GetDistance(s.sprintCheckPos) < 0.6f * 120.0f) {
+						fstate->actorState1.sprinting = 0;
+						f->SetGraphVariableBool("IsSprinting", false);
+						f->NotifyAnimationGraph("SprintStop"sv);
+						s.mirroringSprint = false;
+						logger::info("{} stops sprinting on the spot", Name(f));
+					}
+					s.sprintCheckTime = -1.0f;
+				}
+			} else {
+				s.sprintCheckTime = -1.0f;
 			}
 
 			if (cfg.teleport && cfg.outsideMovement && travelling && !inCombat && dist > tune.teleportDistance) {
