@@ -730,6 +730,42 @@ namespace Followers
 		}
 
 		// Best enemy for a follower: whoever is fighting the player first, then the closest to the player.
+		// ---- enemies her weapon can't hurt (immune, invulnerable, a whirlwind the modpack made an actor):
+		// a player hits one a few times, sees the health bar not move, and leaves it alone for a while.
+		struct HitTally
+		{
+			float hpAtFirst = 0.0f;
+			float firstTime = -100.0f;
+			int   hits = 0;
+		};
+		std::map<std::pair<RE::FormID, RE::FormID>, HitTally> g_hitTally;      // (follower, enemy)
+		std::map<std::pair<RE::FormID, std::uint32_t>, float> g_futileUntil;   // (follower, kind of enemy)
+
+		bool Futile(RE::Actor* f, RE::Actor* e)
+		{
+			if (!f || !e) return false;
+			auto it = g_futileUntil.find({ f->GetFormID(), Experience::KindOf(e) });
+			return it != g_futileUntil.end() && g_time < it->second;
+		}
+
+		void TallyHit(RE::Actor* f, RE::Actor* e)
+		{
+			auto  avo = e->AsActorValueOwner();
+			float hp = avo->GetActorValue(RE::ActorValue::kHealth);
+			auto& t = g_hitTally[{ f->GetFormID(), e->GetFormID() }];
+			if (g_time - t.firstTime > 12.0f) {
+				t = { hp, g_time, 1 };
+				return;
+			}
+			if (++t.hits < 4) return;
+			float maxHp = std::max(1.0f, avo->GetPermanentActorValue(RE::ActorValue::kHealth));
+			if (t.hpAtFirst - hp < 0.01f * maxHp) {
+				g_futileUntil[{ f->GetFormID(), Experience::KindOf(e) }] = g_time + 45.0f;
+				Debug(std::format("{} can't hurt {} ({} hits, health didn't move): leaves it alone", Name(f), Name(e), t.hits));
+			}
+			t = { hp, g_time, 1 };
+		}
+
 		RE::Actor* PickEnemy(RE::Actor* a, const Scan& a_scan, RE::Actor* a_exclude = nullptr, float a_maxFromPlayer = kEnemyRange)
 		{
 			RE::Actor* best = nullptr;
@@ -738,6 +774,7 @@ namespace Followers
 				if (enemy == a_exclude || !TargetsParty(enemy, a_scan) || Dist(enemy, a_scan.player) > a_maxFromPlayer) continue;
 				float score = Dist(enemy, a_scan.player) * 0.6f + Dist(enemy, a) * 0.4f;
 				if (CombatTarget(enemy) == a_scan.player) score -= 400.0f;
+				if (Futile(a, enemy)) score += 100000.0f;  // only if there is nothing else
 				if (score < bestScore) {
 					bestScore = score;
 					best = enemy;
@@ -751,7 +788,7 @@ namespace Followers
 			RE::Actor* best = nullptr;
 			float      bestDist = std::numeric_limits<float>::max();
 			for (auto enemy : a_scan.enemies) {
-				if (enemy == a_exclude || CombatTarget(enemy) != a) continue;
+				if (enemy == a_exclude || CombatTarget(enemy) != a || Futile(a, enemy)) continue;
 				float d = Dist(enemy, a);
 				if (d < bestDist) {
 					bestDist = d;
@@ -946,6 +983,7 @@ namespace Followers
 					g_pendingPlayerHits.push_back({ b->GetHandle(), g_time + 0.15f });
 				} else if (IsFollower(a, player)) {
 					g_state[a->GetFormID()].missedSwings = 0;
+					if (b != player && !b->IsPlayerTeammate() && Alive(b)) TallyHit(a, b);
 				}
 				if (IsFollower(b, player) && a != player && !a->IsPlayerTeammate()) {
 					auto& s = g_state[b->GetFormID()];
@@ -1765,7 +1803,7 @@ namespace Followers
 				if (!Alive(e) || e == a_target) continue;
 				float d = Dist(f, e);
 				if (d < 1000.0f) ++others;
-				if (d > 700.0f || !Experience::StanceVs(f, e).relaxed || !Reachable(f, e)) continue;
+				if (d > 700.0f || Futile(f, e) || !Experience::StanceVs(f, e).relaxed || !Reachable(f, e)) continue;
 				float t = KillTime(f, e);
 				if (t + 0.5f < bestTime) {
 					best = e;
@@ -2245,6 +2283,16 @@ namespace Followers
 			}
 			if (Dist(f, target) > 300.0f) StandUp(f);
 
+			// ---- a target her hits don't hurt: the summoner that made it, or anyone else
+			if (Futile(f, target) && g_time - s.lastRetarget > 1.0f) {
+				auto summoner = target->IsCommandedActor() ? target->GetCommandingActor() : nullptr;
+				RE::Actor* other = summoner && Alive(summoner.get()) && IsEnemyOf(summoner.get(), player) ? summoner.get() : PickEnemy(f, a_scan, target);
+				if (other && other != target && !Futile(f, other)) {
+					StartCombat(f, s, other, "can't hurt its target");
+					return;
+				}
+			}
+
 			// ---- summons: go for the summoner when it can be reached
 			if (cfg.focusSummoners && target->IsCommandedActor() && g_time - s.lastRetarget > 1.0f) {
 				bool ignored = Get(s.ignoredSummon) == target && g_time < s.ignoreSummonUntil;
@@ -2593,6 +2641,8 @@ namespace Followers
 		Tuning::Load();
 		Lab::ForgetHealth();
 		Experience::Apply();
+		g_hitTally.clear();
+		g_futileUntil.clear();
 		{
 			std::scoped_lock lock{ g_lock };
 			g_queue.clear();
