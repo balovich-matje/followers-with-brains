@@ -1089,7 +1089,9 @@ namespace Followers
 			bool  canBlock = (left && left->IsArmor()) ||
 			                (rightWeap && (rightWeap->IsTwoHandedSword() || rightWeap->IsTwoHandedAxe())) ||
 			                (rightWeap && rightWeap->IsMelee() && !left);
-			bool  bashable = canBlock && g_bashFails[e->GetFormID()] < 2 && Dist(f, e) < 200.0f;
+			// (not mid-swing of her own: a bash can't start then)
+			bool  bashable = canBlock && g_bashFails[e->GetFormID()] < 2 && Dist(f, e) < 200.0f &&
+			                f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone;
 
 			// A player's read of the moment: if she can bring it down with the hits she has time for before
 			// its swing lands, dodging only wastes the opening. Keep hitting.
@@ -1204,15 +1206,25 @@ namespace Followers
 
 				if (r.action == 3 && g_time - r.bashTime > 0.2f && g_time - r.bashTime < 0.35f &&
 					f->AsActorState()->GetAttackState() != RE::ATTACK_STATE_ENUM::kBash) {
-					// the bash did not happen: fall back to stepping out of reach
+					// the bash did not happen: a dodge instead (the animation), or a short step out of reach
 					auto e = Get(r.against);
 					EndReflex(f, r);
-					if (Alive(e)) {
+					const char* side = Alive(e) ? Driver::Dodge(f, e, Experience::PickWay(f, e) == 2 ? "right" : "left") : nullptr;
+					if (side) {
+						r.action = 4;
+						r.until = g_time + 0.7f;
+						r.against = e->GetHandle();
+						logger::info("{}: bash did not start, dodges {} instead", Name(f), side);
+					} else if (Alive(e)) {
+						float eReach = 250.0f;
+						if (auto ew = e->GetEquippedObject(false); ew && ew->As<RE::TESObjectWEAP>()) {
+							eReach = std::max(150.0f, ew->As<RE::TESObjectWEAP>()->GetReach() * 140.0f);
+						}
 						Driver::Order order;
 						order.kind = Driver::Kind::kStepBack;
 						order.target = e->GetHandle();
-						order.speed = 480.0f;
-						order.stopDistance = Dist(f, e) + 250.0f;
+						order.speed = Tuning::Get().stepSpeed;
+						order.stopDistance = std::max(Dist(f, e), eReach + 40.0f);  // just out of its reach
 						order.duration = 1.8f;
 						order.holdWhileAttacked = true;
 						Driver::Start(f, order);
