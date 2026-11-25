@@ -15,7 +15,8 @@ namespace Driver
 		kRunTo,     // run toward the target (e.g. the player), facing the way it runs
 		kFormation,  // hold an area next to the target (the player) while it moves
 		kHop,        // jump to the landing point (up a rock, down a ledge, over a fence)
-		kPath        // run along a list of points (e.g. the route the player walked)
+		kPath,       // run along a list of points (e.g. the route the player walked)
+		kStrafe      // step to a point (landing) while facing the target (circling an enemy)
 	};
 
 	struct Order
@@ -71,6 +72,10 @@ namespace Driver
 	// moves the body. Returns the direction, or nullptr when there is no room or the graph refused.
 	// a_prefer: "left", "right" or "back" to try first (others follow when it has no room).
 	const char* Dodge(RE::Actor* a_actor, RE::Actor* a_attacker, std::string_view a_prefer = {});
+
+	// Free room from the actor's feet in a_dir (flat, unit), up to a_max: nothing at chest or knee
+	// height and ground all the way (checked in steps).
+	float Room(RE::Actor* a_actor, const RE::NiPoint3& a_from, const RE::NiPoint3& a_dir, float a_max);
 
 	// The kind of drive in progress ("charge", "stepback", ...), or "" when not driven.
 	const char* Current(RE::Actor* a_actor);

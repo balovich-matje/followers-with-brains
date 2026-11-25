@@ -952,6 +952,7 @@ namespace Followers
 		struct ReflexState
 		{
 			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash, 4 dodge animation
+			float nextRoomCheck = 0.0f;  // keeping room to back off (wall behind her?)
 			RE::ActorHandle seen;      // an attack she has seen coming, to react to at reactAt
 			float reactAt = -1.0f;
 			float until = 0.0f;
@@ -1252,6 +1253,50 @@ namespace Followers
 						ReactToAttack(f, e, r);
 					} else if (Alive(e)) {
 						logger::info("{} reacts too late to {}'s attack", Name(f), Name(e));
+					}
+				}
+
+				// Keep room to back off, as a player does: with a wall or a drop at her back and the enemy
+				// between attacks, she circles round it until there's open ground behind her.
+				if (r.action == 0 && r.reactAt < 0.0f && r.punishAt < 0.0f && !Driver::IsDriving(f) && g_time >= r.nextRoomCheck) {
+					r.nextRoomCheck = g_time + 0.5f;
+					auto e = CombatTarget(f);
+					float d = Alive(e) ? Dist(f, e) : 9999.0f;
+					if (d < 350.0f && !IsRanged(f) && e->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone) {
+						auto         ep = e->GetPosition();
+						RE::NiPoint3 away = f->GetPosition() - ep;
+						away.z = 0.0f;
+						float len = away.Length();
+						if (len > 1.0f) {
+							away = away / len;
+							float back = Driver::Room(f, f->GetPosition(), away, 240.0f);
+							if (back < 160.0f) {
+								int   sign = (std::rand() % 2) ? 1 : -1;
+								float angles[] = { 35.0f * sign, -35.0f * sign, 70.0f * sign, -70.0f * sign };
+								for (float deg : angles) {
+									float        rad = deg * 0.0174533f, c = std::cos(rad), sn = std::sin(rad);
+									RE::NiPoint3 dir{ away.x * c - away.y * sn, away.x * sn + away.y * c, 0.0f };
+									RE::NiPoint3 spot = ep + dir * std::max(len, 150.0f);
+									spot.z = f->GetPosition().z;
+									RE::NiPoint3 way = spot - f->GetPosition();
+									way.z = 0.0f;
+									float wayLen = way.Length();
+									if (wayLen < 40.0f || Driver::Room(f, f->GetPosition(), way / wayLen, wayLen) + 80.0f < wayLen) continue;
+									if (Driver::Room(f, spot, dir, 240.0f) < 240.0f) continue;
+									Driver::Order order;
+									order.kind = Driver::Kind::kStrafe;
+									order.target = e->GetHandle();
+									order.landing = spot;
+									order.speed = 320.0f;
+									order.duration = 1.2f;
+									if (Driver::Start(f, order)) {
+										r.nextRoomCheck = g_time + 2.5f;
+										Debug(std::format("{}: wall behind ({:.0f} room), circles {} round {}", Name(f), back, deg > 0 ? "left" : "right", Name(e)));
+									}
+									break;
+								}
+							}
+						}
 					}
 				}
 

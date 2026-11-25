@@ -699,6 +699,17 @@ namespace Driver
 					d.wantSprint = (sprinting && speedNow > d.order.speed * 1.05f) || speedNow > (d.sprinting ? 480.0f : 560.0f);
 					break;
 				}
+			case Kind::kStrafe:
+				{
+					RE::NiPoint3 toGoal = d.order.landing - pos;
+					toGoal.z = 0.0f;
+					float left = toGoal.Length();
+					if (left < 30.0f) return "arrived";
+					move = toGoal / left;
+					face = Heading(toDir);  // keep the enemy in front
+					d.speedNow = std::min(d.order.speed, left * 4.0f + 80.0f);
+					break;
+				}
 			default:  // run to
 				if (dist <= d.order.stopDistance) return "arrived";
 				move = toDir;
@@ -994,6 +1005,19 @@ namespace Driver
 		return nullptr;
 	}
 
+	float Room(RE::Actor* a_actor, const RE::NiPoint3& a_from, const RE::NiPoint3& a_dir, float a_max)
+	{
+		auto cell = a_actor ? a_actor->GetParentCell() : nullptr;
+		auto world = cell ? cell->GetbhkWorld() : nullptr;
+		if (!world) return a_max;
+		float free = 0.0f;
+		for (float len = 80.0f; len <= a_max + 1.0f; len += 80.0f) {
+			if (!ClearStep(a_actor, world, a_from, a_dir, len)) break;
+			free = len;
+		}
+		return free;
+	}
+
 	const char* Current(RE::Actor* a_actor)
 	{
 		if (!a_actor) return "";
@@ -1006,6 +1030,7 @@ namespace Driver
 		case Kind::kFormation: return "formation";
 		case Kind::kHop: return "hop";
 		case Kind::kPath: return "path";
+		case Kind::kStrafe: return "strafe";
 		}
 		return "?";
 	}
