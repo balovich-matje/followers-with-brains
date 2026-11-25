@@ -720,6 +720,17 @@ namespace Followers
 					scan.enemies.push_back(actor);
 				}
 			}
+			// A follower left far behind drops out of the nearby (high process) actors, and then nothing here
+			// looked after her: stuck somewhere the game can't path from (no navmesh in a custom house), she
+			// stayed there for good. Followers further out are looked after too (catch-up teleport).
+			for (auto list : { &lists->middleHighActorHandles, &lists->middleLowActorHandles, &lists->lowActorHandles }) {
+				for (auto& handle : *list) {
+					auto actor = Get(handle);
+					if (actor && IsFollower(actor, a_player) && std::ranges::find(scan.followers, actor) == scan.followers.end()) {
+						scan.followers.push_back(actor);
+					}
+				}
+			}
 			return scan;
 		}
 
