@@ -1093,6 +1093,11 @@ namespace Followers
 			int   action = 0;  // 0 none, 1 step out, 2 block, 3 bash, 4 dodge animation
 			float nextRoomCheck = 0.0f;  // keeping room to back off (wall behind her?)
 			float nextOpening = 0.0f;    // looking for an opening to strike
+			float nextGuardBreak = 0.0f; // a raised guard: a heavy attack into it
+			float blockSince = -1.0f;
+			float guardCheckAt = -1.0f;  // did that heavy attack stagger it?
+			RE::ActorHandle guardTarget;
+			std::uint32_t   guardKind = 0;
 			float nextFlankCheck = 0.0f; // enemies getting behind her?
 			float nextRegroup = 0.0f;    // outnumbered: back to the player's side
 			float approachCheck = 0.0f;  // closing on a distant target? (dist then)
@@ -1309,6 +1314,15 @@ namespace Followers
 			g_pendingCheck.push_back(g_time);
 			Debug(std::format("{}: {} vs {} ({}{:.0f} dmg, {:.0f}% hp)", Name(f), what, Name(e), power ? "power, " : "", hit, share * 100.0f));
 		}
+
+		// Whether a heavy attack into a raised guard staggers that kind of enemy (vanilla: nearly always;
+		// combat overhauls change it). She keeps doing it only while it works.
+		struct GuardBreaks
+		{
+			int tries = 0;
+			int staggers = 0;
+		};
+		std::map<std::pair<RE::FormID, std::uint32_t>, GuardBreaks> g_guardBreaks;
 
 		void UpdateReflexes()
 		{
@@ -1545,6 +1559,49 @@ namespace Followers
 							logger::info("{}: opening, {} {} ({})", Name(f), Dist(f, e) <= reach + 30.0f ? "strikes" : "steps in on", Name(e),
 								casting ? "it casts" : "it stands there");
 						}
+					}
+				}
+
+				// A raised guard: a player puts a heavy attack into it for a free stagger, as long as that works
+				// in this game (a few tries, then only if it staggers at least a third of the time).
+				if (r.action == 0 && r.reactAt < 0.0f && r.punishAt < 0.0f && r.guardCheckAt < 0.0f && !Driver::IsDriving(f) &&
+					!IsRanged(f) && g_time >= r.nextGuardBreak) {
+					r.nextGuardBreak = g_time + 0.2f;
+					auto e = CombatTarget(f);
+					if (Alive(e) && e->IsBlocking() && Dist(f, e) <= MeleeReach(f) + 30.0f &&
+						f->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kNone && Reachable(f, e)) {
+						if (r.blockSince < 0.0f) r.blockSince = g_time;
+						auto  kind = Experience::KindOf(e);
+						auto& gb = g_guardBreaks[{ f->GetFormID(), kind }];
+						bool  worth = gb.tries < 3 || gb.staggers * 3 >= gb.tries;
+						float stamina = f->AsActorValueOwner()->GetActorValue(RE::ActorValue::kStamina);
+						if (worth && g_time - r.blockSince > 0.3f && stamina >= 30.0f) {
+							if (f->IsBlocking()) f->NotifyAnimationGraph("blockStop"sv);
+							RE::NiPoint3 to = e->GetPosition() - f->GetPosition();
+							if (to.x * to.x + to.y * to.y > 1.0f) f->SetRotationZ(std::atan2(to.x, to.y));
+							bool took = f->NotifyAnimationGraph("attackPowerStartInPlace"sv) || f->NotifyAnimationGraph("attackPowerStartForward"sv);
+							if (took) {
+								r.guardCheckAt = g_time + 1.8f;
+								r.guardTarget = e->GetHandle();
+								r.guardKind = kind;
+								r.nextGuardBreak = g_time + 3.0f;
+								r.blockSince = -1.0f;
+								logger::info("{}: heavy attack into {}'s guard ({} of {} staggered so far)", Name(f), Name(e), gb.staggers, gb.tries);
+							}
+						}
+					} else {
+						r.blockSince = -1.0f;
+					}
+				}
+				if (r.guardCheckAt >= 0.0f) {
+					auto e = Get(r.guardTarget);
+					bool staggered = Alive(e) && IsStaggered(e);
+					if (staggered || g_time > r.guardCheckAt || !Alive(e)) {
+						auto& gb = g_guardBreaks[{ f->GetFormID(), r.guardKind }];
+						++gb.tries;
+						if (staggered) ++gb.staggers;
+						logger::info("{}: guard break vs {}: {}", Name(f), e ? Name(e) : "enemy", staggered ? "staggered" : "no stagger");
+						r.guardCheckAt = -1.0f;
 					}
 				}
 
@@ -2734,6 +2791,7 @@ namespace Followers
 		g_hitTally.clear();
 		g_knockTally.clear();
 		g_futile.clear();
+		g_guardBreaks.clear();
 		{
 			std::scoped_lock lock{ g_lock };
 			g_queue.clear();
