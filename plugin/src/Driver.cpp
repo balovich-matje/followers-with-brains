@@ -216,6 +216,8 @@ namespace Driver
 			RE::NiPoint3 hopFrom;
 			int         lastWeaponState = -1;
 			float       lastMoveKick = 0.0f;
+			float       moveRetryAt = 0.0f;     // the graph refused moveStart (mid-attack recovery): try again soon
+			int         moveRefusals = 0;
 			bool        standing = false;    // formation: legs were stopped, restart them when moving again
 		};
 		std::unordered_map<RE::FormID, Drive>        g_drives;
@@ -808,10 +810,21 @@ namespace Driver
 				d.standing = false;
 				d.lastWeaponState = weaponState;
 			}
-			if (!d.moveSent) {
+			if (!d.moveSent && d.elapsed >= d.moveRetryAt) {
 				bool took = Send(a, "moveStart"sv);
 				d.moveSent = true;
-				if (!took && d.order.kind != Kind::kFormation) logger::info("{}: moveStart refused by the graph", a->GetDisplayFullName());
+				if (!took) {
+					// still finishing a swing or a stagger: without the legs going she glides, so keep asking
+					// every tenth of a second instead of once a second
+					d.moveSent = false;
+					d.moveRetryAt = d.elapsed + 0.1f;
+					if (++d.moveRefusals == 1 && d.order.kind != Kind::kFormation)
+						logger::info("{}: moveStart refused by the graph", a->GetDisplayFullName());
+				} else if (d.moveRefusals > 0) {
+					if (d.order.kind != Kind::kFormation)
+						logger::info("{}: legs going after {} refusals", a->GetDisplayFullName(), d.moveRefusals);
+					d.moveRefusals = 0;
+				}
 			}
 			Sprint(a, d, d.order.sprint || (d.order.kind == Kind::kFormation && d.wantSprint));
 			return nullptr;
