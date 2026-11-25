@@ -97,6 +97,7 @@ namespace Followers
 			bool  mirroringSprint = false;
 			std::deque<float> pressure;            // melee hits on her and backpedals forced on her (bow in hand)
 			float meleeUntil = 0.0f;               // switched to melee under pressure: keep it until then
+			float shotBlockedAt = -100.0f;         // her last arrow hit scenery (low cover in the way)
 			bool  wasKnocked = false;
 			float weaponStuckSince = -1.0f;        // weapon half drawn or half sheathed
 			RE::ActorHandle addsFirstFor;          // a summoner too tough to rush: its summons first
@@ -146,6 +147,7 @@ namespace Followers
 			kFollowerSwing,
 			kHit,
 			kMeleeHit,  // a weapon or claw that connected (not a spell, an arrow or a lingering effect)
+			kShotBlocked,  // a = follower whose arrow or bolt hit scenery
 			kDeath,
 			kHazard  // b = an actor hurt by something that isn't an actor (a trap, fire, a fall)
 		};
@@ -1042,6 +1044,9 @@ namespace Followers
 				}
 				break;
 
+			case EventType::kShotBlocked:
+				if (a && IsFollower(a, player)) g_state[a->GetFormID()].shotBlockedAt = g_time;
+				break;
 			case EventType::kMeleeHit:  // a = attacker, b = victim
 				if (a && b && IsFollower(a, player) && b != player && !b->IsPlayerTeammate() && Alive(b)) TallyHit(a, b);
 				if (a && b && IsFollower(b, player)) {
@@ -1617,6 +1622,30 @@ namespace Followers
 					}
 				}
 
+				// Her arrow hit scenery (a rock or rail between her and a kneeling enemy): a player moves for a
+				// clear shot instead of loosing into the cover again.
+				if (IsRanged(f) && !Driver::IsDriving(f) && g_time - g_state[f->GetFormID()].shotBlockedAt < 0.5f && g_time >= r.nextKite) {
+					auto e = CombatTarget(f);
+					bool hunted = false;  // (never walk into someone coming for her: kiting comes first)
+					for (auto& h : g_lastEnemies) {
+						auto o = Get(h);
+						if (Alive(o) && o != e && CombatTarget(o) == f && Dist(f, o) < 500.0f) hunted = true;
+					}
+					if (Alive(e) && !hunted) {
+						Driver::Order order;
+						order.kind = Driver::Kind::kRunTo;
+						order.target = e->GetHandle();
+						order.speed = Tuning::Get().closeSpeed;
+						order.stopDistance = std::max(250.0f, Dist(f, e) * 0.5f);
+						order.duration = 2.0f;
+						if (Driver::Start(f, order)) {
+							g_state[f->GetFormID()].shotBlockedAt = -100.0f;
+							r.nextKite = g_time + 2.0f;
+							logger::info("{}: arrow hit cover, moves in for a clear shot at {}", Name(f), Name(e));
+						}
+					}
+				}
+
 				// Bow drawn but the target behind a pillar: a player lowers the bow and walks round at full
 				// speed instead of creeping along drawn.
 				{
@@ -1934,6 +1963,11 @@ namespace Followers
 					s.meleeUntil = g_time + 6.0f;
 					SetWeaponPref(f, 1);
 					if (ranged) Swap(f, s, false, std::format("they keep catching her ({} in 10 s)", s.pressure.size()));
+				} else if (!ranged && !onHer && NearestEnemyDist(f) > 300.0f) {
+					// nobody after her any more (the one on her is dead): back to the bow at once
+					s.meleeUntil = 0.0f;
+					SetWeaponPref(f, 2);
+					Swap(f, s, true, "nobody on her, back to the bow");
 				} else if (!ranged && onHer && g_time < s.meleeUntil + 6.0f) {
 					s.meleeUntil = std::max(s.meleeUntil, g_time + 1.0f);  // still on her: keep fighting
 				} else if (g_time >= s.meleeUntil) {
@@ -2789,6 +2823,9 @@ namespace Followers
 					if (!a_event->projectile && !blocked && (!source || (weap && weap->IsMelee()))) {
 						Queue(EventType::kMeleeHit, HandleOf(a_event->cause.get()), HandleOf(a_event->target.get()));
 					}
+				}
+				if (a_event && a_event->cause && a_event->target && a_event->projectile && !a_event->target->As<RE::Actor>()) {
+					Queue(EventType::kShotBlocked, HandleOf(a_event->cause.get()));
 				}
 				if (a_event && a_event->target && (!a_event->cause || !a_event->cause->As<RE::Actor>())) {
 					Queue(EventType::kHazard, {}, HandleOf(a_event->target.get()));
